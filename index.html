@@ -1,0 +1,459 @@
+<!--
+  ПРОТОТИП СКАНЕРА (Германия) — Фаза 1
+  ------------------------------------------------------------------
+  Реализует схему скана:
+     штрих-код → свой кэш → Open Food Facts → [ИИ-заглушка]
+                                    ↓
+                        карточка из 3 слоёв
+  ------------------------------------------------------------------
+  БЕСПЛАТНО и РЕАЛЬНО работает:
+     • поиск в кэше (в памяти сессии)
+     • запрос в Open Food Facts (живой API, без ключа)
+  ЗАГЛУШКИ (помечены STUB — сюда позже вставляешь реальные API):
+     • recognizeWithAI() — ИИ-распознавание фото нового товара  ($ платно)
+     • fetchPrices()     — цены из SERP/Shopping API            ($$ платно)
+     • fetchLabRating()  — оценки Öko-Test / Stiftung Warentest (~$0, ручной занос)
+  Штрих-коды для теста — кнопки под полем ввода.
+-->
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Сканер · прототип Фазы 1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f3f4f0; --panel:#ffffff; --ink:#17181a; --muted:#71757c;
+    --line:#e4e5e0; --line-strong:#c9cbc4;
+    --blue:#1f6feb; --blue-bg:#e8f0fe;
+    --stub:#b06a00; --stub-bg:#fdf3e2;
+    --free:#0a7d43; --free-bg:#e6f4ec;
+    /* Nutri-Score / светофор */
+    --na:#0a8140; --nb:#7ac13c; --nc:#f5c518; --nd:#f08a1d; --ne:#e0402a;
+    --good:#0a7d43; --warn:#b06a00; --bad:#c8321e;
+    --radius:12px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0}
+  body{
+    font-family:'Inter',system-ui,sans-serif; background:var(--bg); color:var(--ink);
+    line-height:1.5; padding:24px 16px; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:440px; margin:0 auto}
+  .mono{font-family:'IBM Plex Mono',monospace}
+
+  header{margin-bottom:20px}
+  header h1{font-size:19px; font-weight:600; letter-spacing:-0.01em}
+  header p{font-size:13px; color:var(--muted); margin-top:2px}
+
+  /* поле ввода */
+  .scan-box{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:14px; margin-bottom:14px}
+  .scan-row{display:flex; gap:8px}
+  .scan-row input{
+    flex:1; font-family:'IBM Plex Mono',monospace; font-size:15px; letter-spacing:0.02em;
+    border:1px solid var(--line-strong); border-radius:8px; padding:10px 12px; color:var(--ink); background:#fff;
+  }
+  .scan-row input:focus{outline:2px solid var(--blue); outline-offset:-1px; border-color:var(--blue)}
+  .scan-row button{
+    font-family:inherit; font-size:14px; font-weight:500; color:#fff; background:var(--blue);
+    border:none; border-radius:8px; padding:0 18px; cursor:pointer;
+  }
+  .scan-row button:hover{background:#1a5fd0}
+  .examples{display:flex; flex-wrap:wrap; gap:6px; margin-top:10px}
+  .examples button{
+    font-family:inherit; font-size:12px; color:var(--muted); background:#f6f6f3;
+    border:1px solid var(--line); border-radius:20px; padding:4px 11px; cursor:pointer;
+  }
+  .examples button:hover{border-color:var(--line-strong); color:var(--ink)}
+
+  /* трассировка потока */
+  .trace{font-family:'IBM Plex Mono',monospace; font-size:11.5px; color:var(--muted); min-height:18px; margin-bottom:12px; padding-left:2px}
+  .trace .hit{color:var(--free)}
+  .trace .stub{color:var(--stub)}
+
+  /* карточка */
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden}
+  .card.hidden{display:none}
+  .card-head{display:flex; gap:12px; padding:16px; border-bottom:1px solid var(--line)}
+  .card-head img{width:56px; height:56px; border-radius:9px; object-fit:cover; border:1px solid var(--line); background:#f6f6f3; flex-shrink:0}
+  .card-head .ph{width:56px; height:56px; border-radius:9px; background:#f0f0ec; display:flex; align-items:center; justify-content:center; font-size:22px; flex-shrink:0}
+  .card-head h2{font-size:15px; font-weight:600; line-height:1.3}
+  .card-head .brand{font-size:13px; color:var(--muted); margin-top:2px}
+
+  .layer{padding:14px 16px; border-bottom:1px solid var(--line)}
+  .layer:last-child{border-bottom:none}
+  .layer-top{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px}
+  .layer-name{font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:0.06em; color:var(--muted)}
+  .tag{font-family:'IBM Plex Mono',monospace; font-size:10px; padding:2px 7px; border-radius:5px; font-weight:500}
+  .tag.free{color:var(--free); background:var(--free-bg)}
+  .tag.stub{color:var(--stub); background:var(--stub-bg)}
+
+  /* оценки */
+  .scores{display:flex; gap:8px}
+  .score{flex:1; border-radius:8px; padding:8px 4px; text-align:center; color:#fff}
+  .score .lbl{font-size:10px; opacity:0.9}
+  .score .val{font-size:20px; font-weight:600; line-height:1.1; font-family:'IBM Plex Mono',monospace}
+  .score small{display:block; font-size:9px; opacity:0.9; margin-top:1px}
+
+  .flags{display:flex; flex-wrap:wrap; gap:6px; margin-top:10px}
+  .flag{font-size:11.5px; padding:3px 9px; border-radius:20px; background:#f4f4f0; color:var(--muted)}
+  .flag.bad{background:#fbeae7; color:var(--bad)}
+  .flag.warn{background:var(--stub-bg); color:var(--stub)}
+
+  .ingredients{font-size:12.5px; line-height:1.6; color:var(--ink)}
+  .ingredients .alg{background:#fbeae7; color:var(--bad); padding:0 3px; border-radius:3px; font-weight:500}
+
+  table.nutri{width:100%; font-size:12.5px; border-collapse:collapse}
+  table.nutri td{padding:3px 0}
+  table.nutri td:last-child{text-align:right; font-family:'IBM Plex Mono',monospace}
+  .dot{font-size:10px} .dot.g{color:var(--good)} .dot.w{color:var(--warn)} .dot.b{color:var(--bad)}
+
+  /* цены */
+  .prices{display:flex; flex-direction:column; gap:6px}
+  .price-row{display:flex; align-items:center; justify-content:space-between; font-size:13px}
+  .price-row .shop{color:var(--muted)}
+  .price-row .amt{font-family:'IBM Plex Mono',monospace; font-weight:500}
+  .price-row.best .amt{color:var(--free)}
+
+  /* лаборатория */
+  .lab{display:flex; align-items:center; gap:10px}
+  .lab .grade{font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:15px; padding:4px 10px; border-radius:7px; color:#fff}
+  .lab .src{font-size:12px; color:var(--muted)}
+
+  .attr{font-size:10.5px; color:var(--muted); text-align:center; margin-top:14px; line-height:1.5}
+  .empty{padding:28px 16px; text-align:center; color:var(--muted); font-size:13px}
+
+  /* камера */
+  .cam-btn{width:100%; margin-top:8px; font-family:inherit; font-size:14px; font-weight:500; color:var(--blue); background:var(--blue-bg); border:1px solid #cfe0fb; border-radius:8px; padding:9px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px}
+  .cam-btn:hover{background:#dde9fd}
+  .cam-btn.active{color:var(--bad); background:#fbeae7; border-color:#f2c9c1}
+  #reader{margin-top:10px; border-radius:10px; overflow:hidden; display:none}
+  #reader.on{display:block}
+  #reader video{border-radius:10px; display:block; width:100%}
+  .cam-hint{font-size:11px; color:var(--muted); text-align:center; margin-top:6px; line-height:1.5}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Сканер продуктов · прототип</h1>
+    <p>Фаза 1 — Германия. Реальный поток кэш→OFF, платные слои на заглушках.</p>
+  </header>
+
+  <div class="scan-box">
+    <div class="scan-row">
+      <input id="ean" class="mono" inputmode="numeric" placeholder="Штрих-код (EAN-13)" value="4002971067309">
+      <button id="go">Найти</button>
+    </div>
+    <div class="examples">
+      <button data-ean="4002971067309">Ehrmann Almighurt</button>
+      <button data-ean="3017620422003">Nutella</button>
+      <button data-ean="5449000000996">Coca-Cola</button>
+      <button data-ean="1111111111111">Новый товар → ИИ</button>
+    </div>
+    <button class="cam-btn" id="camBtn"><span>📷</span> Сканировать камерой</button>
+    <div id="reader"></div>
+    <div class="cam-hint" id="camHint"></div>
+  </div>
+
+  <div class="trace mono" id="trace"></div>
+
+  <div class="card hidden" id="card"></div>
+</div>
+
+<script>
+"use strict";
+
+/* ================================================================
+   КОНФИГ
+   ================================================================ */
+const OFF_ENDPOINT = "https://world.openfoodfacts.org/api/v2/product/";
+const OFF_FIELDS = [
+  "product_name","brands","quantity","image_front_small_url","image_ingredients_small_url",
+  "nutriscore_grade","nova_group","ecoscore_grade","allergens_tags",
+  "ingredients_analysis_tags","ingredients_text_with_allergens","additives_tags",
+  "nutriments","nutrient_levels","categories_tags"
+].join(",");
+
+/* Кэш в памяти сессии. В реальном приложении — своя БД (та самая "своя база"). */
+const cache = new Map();
+
+const el = (id) => document.getElementById(id);
+const trace = (html) => { el("trace").innerHTML = html; };
+
+/* ================================================================
+   СЛОЙ 1 — ЯДРО / ЗДОРОВЬЕ  (бесплатно, реально)
+   ================================================================ */
+
+// Реальный запрос в Open Food Facts. Без ключа, поддерживает CORS.
+async function fetchFromOFF(ean){
+  const url = `${OFF_ENDPOINT}${ean}.json?fields=${OFF_FIELDS}`;
+  const res = await fetch(url);
+  const data = await res.json();
+  if (data.status === 1) return data.product;
+  return null; // status 0 → товара нет (cache miss)
+}
+
+// ---- STUB: ИИ-распознавание фото нового товара --------------------
+// $ ПЛАТНО. Срабатывает, только когда товара нет ни в кэше, ни в OFF.
+// Позже: сюда — вызов мультимодальной модели с фото упаковки.
+// Сейчас: возвращает правдоподобную заглушку.
+async function recognizeWithAI(ean){
+  await wait(600); // имитация задержки распознавания
+  return {
+    _stub: true,
+    product_name: "Неизвестный товар (распознан ИИ)",
+    brands: "—",
+    quantity: "—",
+    nutriscore_grade: null, nova_group: null, ecoscore_grade: null,
+    allergens_tags: [], ingredients_analysis_tags: [],
+    ingredients_text_with_allergens: "Состав распознан бы с фото упаковки.",
+    additives_tags: [], nutriments: {}, nutrient_levels: {}, categories_tags: []
+  };
+}
+
+/* ================================================================
+   СЛОЙ 2 — ЦЕНЫ  ($$ платно)
+   ================================================================ */
+
+// ---- STUB: цены из SERP/Shopping API ------------------------------
+// Позже: сюда — запрос к легальному ценовому API по EAN (не по названию!),
+// с кэшем 24ч и ночным batch. Сейчас: фиксированная заглушка.
+async function fetchPrices(ean){
+  await wait(300);
+  const mock = {
+    "4002971067309":[{shop:"Aldi Süd",p:0.89},{shop:"REWE",p:1.09},{shop:"Globus",p:1.19}],
+    "3017620422003":[{shop:"Lidl",p:2.49},{shop:"Edeka",p:2.99},{shop:"dm",p:3.15}],
+    "5449000000996":[{shop:"REWE",p:0.99},{shop:"Aldi Süd",p:0.95},{shop:"Edeka",p:1.09}]
+  };
+  return mock[ean] || null; // null → "цену пока собираем" (мягкая деградация)
+}
+
+/* ================================================================
+   СЛОЙ 3 — ЛАБОРАТОРИИ  (~$0, ручной занос по категориям)
+   ================================================================ */
+
+// ---- STUB: оценки Öko-Test / Stiftung Warentest -------------------
+// Позже: сюда — своя таблица результатов, занесённая по категориям.
+// Сейчас: заглушка по категории йогуртов.
+async function fetchLabRating(product){
+  await wait(150);
+  const cats = product.categories_tags || [];
+  if (cats.some(c => c.includes("yogurt") || c.includes("joghurt"))){
+    return {grade:"gut (2,1)", color:"var(--nb)", src:"Stiftung Warentest · 03/2024"};
+  }
+  if (cats.some(c => c.includes("spread") || c.includes("chocolate"))){
+    return {grade:"befriedigend", color:"var(--nc)", src:"Öko-Test"};
+  }
+  return null;
+}
+
+/* ================================================================
+   ОРКЕСТРАТОР — тот самый алгоритм скана
+   ================================================================ */
+async function lookupProduct(ean){
+  // 1) свой кэш
+  if (cache.has(ean)){
+    trace(`<span class="hit">✓ найдено в кэше</span> · $0`);
+    return cache.get(ean);
+  }
+  // 2) Open Food Facts
+  trace(`запрос в Open Food Facts…`);
+  let product = await fetchFromOFF(ean);
+  if (product){
+    trace(`<span class="hit">✓ Open Food Facts</span> · $0 · сохранено в кэш`);
+    cache.set(ean, product);
+    return product;
+  }
+  // 3) нет нигде → ИИ-заглушка (единственная платная ветка)
+  trace(`нет в OFF → <span class="stub">ИИ-распознавание (заглушка $)</span> · сохранено в кэш`);
+  product = await recognizeWithAI(ean);
+  cache.set(ean, product);
+  return product;
+}
+
+/* ================================================================
+   СБОРКА КАРТОЧКИ
+   ================================================================ */
+async function render(ean){
+  ean = (ean||"").trim();
+  if (!/^\d{6,14}$/.test(ean)){ trace(`введите штрих-код (только цифры)`); return; }
+
+  const product = await lookupProduct(ean);
+
+  // платные слои — параллельно, поверх готового товара
+  const [prices, lab] = await Promise.all([fetchPrices(ean), fetchLabRating(product)]);
+
+  const img = product.image_front_small_url;
+  const ns = product.nutriscore_grade;
+  const nova = product.nova_group;
+  const eco = product.ecoscore_grade;
+  const nsColor = {a:"var(--na)",b:"var(--nb)",c:"var(--nc)",d:"var(--nd)",e:"var(--ne)"}[ns] || "#c9cbc4";
+  const ecoColor = {a:"var(--na)",b:"var(--nb)",c:"var(--nc)",d:"var(--nd)",e:"var(--ne)"}[eco] || "#c9cbc4";
+
+  const alg = (product.allergens_tags||[]).map(a=>a.replace(/^en:/,""));
+  const ana = product.ingredients_analysis_tags||[];
+  const flags = [];
+  alg.forEach(a => flags.push(`<span class="flag bad">аллерген: ${a}</span>`));
+  if (ana.includes("en:palm-oil")) flags.push(`<span class="flag warn">пальмовое масло</span>`);
+  else if (ana.includes("en:may-contain-palm-oil")) flags.push(`<span class="flag warn">возможно пальмовое масло</span>`);
+  if (ana.includes("en:vegan")) flags.push(`<span class="flag">веганский</span>`);
+  else if (ana.includes("en:non-vegan")) flags.push(`<span class="flag">не веганский</span>`);
+
+  const n = product.nutriments||{};
+  const lv = product.nutrient_levels||{};
+  const dot = (k)=>({low:'<span class="dot g">● мало</span>',moderate:'<span class="dot w">● умеренно</span>',high:'<span class="dot b">● много</span>'}[lv[k]]||"");
+  const num = (v,u)=> (v===undefined||v===null)?"—":`${(+v).toLocaleString("ru-RU")}${u||""}`;
+
+  let nutriRows = "";
+  if (Object.keys(n).length){
+    nutriRows = `
+      <tr><td>Калории</td><td>${num(n["energy-kcal_100g"]," ккал")}</td></tr>
+      <tr><td>Сахара ${dot("sugars")}</td><td>${num(n["sugars_100g"]," г")}</td></tr>
+      <tr><td>Жиры ${dot("fat")}</td><td>${num(n["fat_100g"]," г")}</td></tr>
+      <tr><td>Белки</td><td>${num(n["proteins_100g"]," г")}</td></tr>
+      <tr><td>Соль ${dot("salt")}</td><td>${num(n["salt_100g"]," г")}</td></tr>`;
+  }
+
+  // блок цен
+  let priceBlock;
+  if (prices){
+    const min = Math.min(...prices.map(p=>p.p));
+    priceBlock = `<div class="prices">` + prices
+      .sort((a,b)=>a.p-b.p)
+      .map(p=>`<div class="price-row ${p.p===min?'best':''}"><span class="shop">${p.shop}</span><span class="amt">${p.p.toFixed(2).replace('.',',')} €</span></div>`)
+      .join("") + `</div>`;
+  } else {
+    priceBlock = `<div class="empty" style="padding:8px 0">Цену пока собираем</div>`;
+  }
+
+  // блок лаборатории
+  let labBlock;
+  if (lab){
+    labBlock = `<div class="lab"><span class="grade" style="background:${lab.color}">${lab.grade}</span><span class="src">${lab.src}</span></div>`;
+  } else {
+    labBlock = `<div class="empty" style="padding:8px 0">Тест лаборатории по этой категории пока не занесён</div>`;
+  }
+
+  const scoresBlock = (ns||nova||eco) ? `
+    <div class="scores">
+      <div class="score" style="background:${nsColor}"><span class="lbl">Nutri-Score</span><span class="val">${ns?ns.toUpperCase():"—"}</span></div>
+      <div class="score" style="background:${nova?'var(--ne)':'#c9cbc4'}"><span class="lbl">NOVA</span><span class="val">${nova||"—"}</span>${nova==4?'<small>ультра-обр.</small>':''}</div>
+      <div class="score" style="background:${ecoColor}"><span class="lbl">Eco-Score</span><span class="val">${eco?eco.toUpperCase():"—"}</span></div>
+    </div>` : `<div class="empty" style="padding:8px 0">Оценки появятся после распознавания состава</div>`;
+
+  el("card").classList.remove("hidden");
+  el("card").innerHTML = `
+    <div class="card-head">
+      ${img?`<img src="${img}" alt="">`:`<div class="ph">📦</div>`}
+      <div>
+        <h2>${product.product_name||"Без названия"}</h2>
+        <div class="brand">${product.brands||"—"}${product.quantity?" · "+product.quantity:""}</div>
+      </div>
+    </div>
+
+    <div class="layer">
+      <div class="layer-top"><span class="layer-name">Здоровье</span><span class="tag free">OFF · $0</span></div>
+      ${scoresBlock}
+      ${flags.length?`<div class="flags">${flags.join("")}</div>`:""}
+    </div>
+
+    ${nutriRows?`<div class="layer">
+      <div class="layer-top"><span class="layer-name">Пищевая ценность · 100 г</span><span class="tag free">OFF · $0</span></div>
+      <table class="nutri">${nutriRows}</table>
+    </div>`:""}
+
+    ${product.ingredients_text_with_allergens?`<div class="layer">
+      <div class="layer-top"><span class="layer-name">Состав</span><span class="tag free">OFF · $0</span></div>
+      <div class="ingredients">${product.ingredients_text_with_allergens.replace(/class="allergen"/g,'class="alg"')}</div>
+    </div>`:""}
+
+    <div class="layer">
+      <div class="layer-top"><span class="layer-name">Цены · Германия</span><span class="tag stub">заглушка · $$</span></div>
+      ${priceBlock}
+    </div>
+
+    <div class="layer">
+      <div class="layer-top"><span class="layer-name">Оценка лаборатории</span><span class="tag stub">заглушка · ~$0</span></div>
+      ${labBlock}
+    </div>
+
+    <div class="attr">Данные о составе © Open Food Facts (ODbL). Цены и оценки лабораторий — демо-заглушки.</div>
+  `;
+}
+
+/* ================================================================
+   ВСПОМОГАТЕЛЬНОЕ + СОБЫТИЯ
+   ================================================================ */
+function wait(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+el("go").addEventListener("click", ()=>render(el("ean").value));
+el("ean").addEventListener("keydown", e=>{ if(e.key==="Enter") render(el("ean").value); });
+document.querySelectorAll(".examples button").forEach(b=>{
+  b.addEventListener("click", ()=>{ el("ean").value=b.dataset.ean; render(b.dataset.ean); });
+});
+
+/* ================================================================
+   СЧИТЫВАНИЕ ШТРИХ-КОДА КАМЕРОЙ (html5-qrcode)
+   ================================================================ */
+let scanner = null, scanning = false;
+const camBtn = el("camBtn"), reader = el("reader"), camHint = el("camHint");
+
+async function startCamera(){
+  if (typeof Html5Qrcode === "undefined"){
+    camHint.textContent = "Сканер не загрузился — проверь соединение с интернетом.";
+    return;
+  }
+  scanner = new Html5Qrcode("reader", {
+    formatsToSupport: [
+      Html5QrcodeSupportedFormats.EAN_13,
+      Html5QrcodeSupportedFormats.EAN_8,
+      Html5QrcodeSupportedFormats.UPC_A,
+      Html5QrcodeSupportedFormats.UPC_E
+    ]
+  });
+  reader.classList.add("on");
+  try{
+    await scanner.start(
+      { facingMode: "environment" },              // задняя камера
+      { fps: 10, qrbox: { width: 260, height: 120 } },
+      (text) => onScan(text),                      // успех
+      () => {}                                     // покадровые промахи — игнор
+    );
+    scanning = true;
+    camBtn.classList.add("active");
+    camBtn.innerHTML = '<span>✕</span> Остановить';
+    camHint.textContent = "Наведи заднюю камеру на штрих-код товара.";
+  }catch(err){
+    reader.classList.remove("on");
+    scanner = null;
+    camHint.textContent = "Нет доступа к камере. В превью артефакта камера часто заблокирована — скачай файл и открой локально (нужен https или localhost) на телефоне.";
+  }
+}
+
+async function stopCamera(){
+  if (scanner && scanning){ try{ await scanner.stop(); }catch(e){} }
+  scanning = false; scanner = null;
+  reader.classList.remove("on"); reader.innerHTML = "";
+  camBtn.classList.remove("active");
+  camBtn.innerHTML = '<span>📷</span> Сканировать камерой';
+}
+
+function onScan(text){
+  const ean = (text || "").replace(/\D/g, "");   // оставляем только цифры
+  el("ean").value = ean;
+  stopCamera();
+  camHint.textContent = "Считано: " + ean;
+  render(ean);
+}
+
+camBtn.addEventListener("click", ()=>{ scanning ? stopCamera() : startCamera(); });
+
+// первый показ
+render(el("ean").value);
+</script>
+</body>
+</html>
