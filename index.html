@@ -133,6 +133,27 @@
   #reader.on{display:block}
   #reader video{border-radius:10px; display:block; width:100%}
   .cam-hint{font-size:11px; color:var(--muted); text-align:center; margin-top:6px; line-height:1.5}
+
+  /* запрос фото для нового товара */
+  .photo-ask{display:none; background:var(--stub-bg); border:1px solid #f0d9ac; border-radius:var(--radius); padding:14px; margin-bottom:12px}
+  .photo-ask.on{display:block}
+  .pa-title{font-size:13px; color:#7a4e00; margin-bottom:12px; line-height:1.5; font-weight:500}
+  .pa-shot{background:#fff; border:1px solid #f0d9ac; border-radius:9px; padding:11px; margin-bottom:8px}
+  .pa-shot-info{display:flex; gap:9px; margin-bottom:9px}
+  .pa-num{flex-shrink:0; width:20px; height:20px; border-radius:50%; background:var(--stub); color:#fff; font-size:12px; font-weight:600; display:flex; align-items:center; justify-content:center; margin-top:1px}
+  .pa-shot-name{font-size:13px; font-weight:600; color:var(--ink)}
+  .pa-req{font-size:10px; font-weight:500; color:var(--bad); background:#fbeae7; padding:1px 7px; border-radius:10px; margin-left:4px; text-transform:uppercase; letter-spacing:0.03em}
+  .pa-opt{font-size:10px; font-weight:500; color:var(--muted); background:#f2f2ee; padding:1px 7px; border-radius:10px; margin-left:4px; text-transform:uppercase; letter-spacing:0.03em}
+  .pa-shot-hint{font-size:11.5px; color:var(--muted); line-height:1.45; margin-top:3px}
+  .pa-btn{width:100%; font-family:inherit; font-size:13px; font-weight:500; color:#fff; background:var(--stub); border:none; border-radius:7px; padding:8px; cursor:pointer}
+  .pa-btn:hover{background:#96590a}
+  .pa-btn-ghost{color:var(--stub); background:transparent; border:1px solid var(--stub)}
+  .pa-btn-ghost:hover{background:#fdf3e2}
+  .pa-done{font-size:11.5px; color:var(--free); margin-top:6px; display:none}
+  .pa-done.on{display:block}
+  .pa-go{width:100%; font-family:inherit; font-size:14px; font-weight:600; color:#fff; background:var(--blue); border:none; border-radius:8px; padding:11px; cursor:pointer; margin-top:4px}
+  .pa-go:hover{background:#1a5fd0}
+  .pa-go:disabled{opacity:0.45; cursor:default}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
 </head>
@@ -161,6 +182,39 @@
 
   <div class="trace mono" id="trace"></div>
 
+  <!-- запрос фото для нового товара (появляется, когда товара нет в OFF) -->
+  <div class="photo-ask" id="photoAsk">
+    <p class="pa-title">Товара нет в базе. Сфотографируй упаковку — данные распознает ИИ.</p>
+
+    <div class="pa-shot" id="shotBack">
+      <div class="pa-shot-info">
+        <span class="pa-num">1</span>
+        <div>
+          <div class="pa-shot-name">Оборот упаковки <span class="pa-req">обязательно</span></div>
+          <div class="pa-shot-hint">Состав и таблицу «Nährwerte» вместе. Снимай крупно, ближе, без бликов — от этого зависит оценка.</div>
+        </div>
+      </div>
+      <button class="pa-btn" id="btnBack">📷 Снять оборот</button>
+      <div class="pa-done" id="doneBack"></div>
+    </div>
+
+    <div class="pa-shot" id="shotFront">
+      <div class="pa-shot-info">
+        <span class="pa-num">2</span>
+        <div>
+          <div class="pa-shot-name">Лицевая сторона <span class="pa-opt">по желанию</span></div>
+          <div class="pa-shot-hint">Продукт целиком — станет иконкой в карточке.</div>
+        </div>
+      </div>
+      <button class="pa-btn pa-btn-ghost" id="btnFront">📷 Снять лицевую</button>
+      <div class="pa-done" id="doneFront"></div>
+    </div>
+
+    <button class="pa-go" id="btnRecognize" disabled>Распознать</button>
+  </div>
+  <input type="file" id="inpBack"  accept="image/*" capture="environment" style="display:none">
+  <input type="file" id="inpFront" accept="image/*" capture="environment" style="display:none">
+
   <div class="card hidden" id="card"></div>
 </div>
 
@@ -171,11 +225,16 @@
    КОНФИГ
    ================================================================ */
 const OFF_ENDPOINT = "https://world.openfoodfacts.org/api/v2/product/";
+// Адрес локального посредника для ИИ-распознавания (см. папку ai-proxy).
+// Пусто → распознавание выключено (прототип работает, но новые товары не распознаёт).
+const AI_PROXY_URL = "http://localhost:8787/recognize";
 const OFF_FIELDS = [
   "product_name","brands","quantity","image_front_small_url","image_ingredients_small_url",
   "nutriscore_grade","nova_group","ecoscore_grade","allergens_tags",
   "ingredients_analysis_tags","ingredients_text_with_allergens","additives_tags",
-  "nutriments","nutrient_levels","categories_tags"
+  "nutriments","nutrient_levels","categories_tags",
+  // --- поля для гейта качества данных (видеть "грязный" состав, кейс Milbona) ---
+  "ingredients_n","unknown_ingredients_n","states_tags"
 ].join(",");
 
 /* Кэш в памяти сессии. В реальном приложении — своя БД (та самая "своя база"). */
@@ -190,27 +249,65 @@ const trace = (html) => { el("trace").innerHTML = html; };
 
 // Реальный запрос в Open Food Facts. Без ключа, поддерживает CORS.
 async function fetchFromOFF(ean){
-  const url = `${OFF_ENDPOINT}${ean}.json?fields=${OFF_FIELDS}`;
+  const url = `${OFF_ENDPOINT}${ean}.json?fields=code,${OFF_FIELDS}`;
   const res = await fetch(url);
   const data = await res.json();
-  if (data.status === 1) return data.product;
-  return null; // status 0 → товара нет (cache miss)
+  // status 1 И код в ответе совпадает с запрошенным (OFF на «мусорных» кодах
+  // иногда отдаёт status 0 с телом от другого товара — такое отбрасываем)
+  if (data.status === 1 && data.product && String(data.product.code) === String(ean)){
+    return data.product;
+  }
+  return null; // товара нет (cache miss) → пойдём в ИИ-распознавание
 }
 
-// ---- STUB: ИИ-распознавание фото нового товара --------------------
-// $ ПЛАТНО. Срабатывает, только когда товара нет ни в кэше, ни в OFF.
-// Позже: сюда — вызов мультимодальной модели с фото упаковки.
-// Сейчас: возвращает правдоподобную заглушку.
-async function recognizeWithAI(ean){
-  await wait(600); // имитация задержки распознавания
+// ---- ИИ-распознавание фото нового товара --------------------------
+// $ ПЛАТНО. Принимает список выбранных фото (оборот обязателен, лицевая опц.)
+// и шлёт их посреднику (ai-proxy), который хранит ключ и зовёт модель.
+async function recognizeWithAI(ean, files){
+  trace(`<span class="stub">отправляю фото на распознавание…</span>`);
+  try{
+    const images = [];
+    for (const f of files){ if (f) images.push(await fileToBase64(f)); }
+    if (!images.length) return notRecognized(ean, "Нет фото для распознавания.");
+
+    const res = await fetch(AI_PROXY_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ images, barcode: ean })
+    });
+    if (!res.ok){
+      const e = await res.json().catch(()=>({}));
+      return notRecognized(ean, "Посредник вернул ошибку: " + (e.error || res.status));
+    }
+    const p = await res.json();
+    return {
+      _ai: true,
+      code: ean,
+      product_name: p.product_name || "Распознанный товар",
+      brands: p.brands || "—",
+      quantity: p.quantity || "",
+      nutriscore_grade: null, nova_group: null, ecoscore_grade: null,
+      allergens_tags: (p.allergens||[]).map(a => "en:"+a),
+      ingredients_analysis_tags: [],
+      ingredients_text_with_allergens: p.ingredients_text || "",
+      additives_tags: [],
+      nutriments: p.nutriments || {},
+      nutrient_levels: {},
+      categories_tags: []
+    };
+  }catch(err){
+    return notRecognized(ean, "Распознавание недоступно (посредник не запущен?). Прототип работает без него.");
+  }
+}
+
+// болванка, когда распознать не удалось — карточка не пустая, а честная
+function notRecognized(ean, msg){
   return {
-    _stub: true,
-    product_name: "Неизвестный товар (распознан ИИ)",
-    brands: "—",
-    quantity: "—",
+    _failed: true, _msg: msg, code: ean,
+    product_name: "Товар не в базе", brands: "—", quantity: "",
     nutriscore_grade: null, nova_group: null, ecoscore_grade: null,
     allergens_tags: [], ingredients_analysis_tags: [],
-    ingredients_text_with_allergens: "Состав распознан бы с фото упаковки.",
+    ingredients_text_with_allergens: msg,
     additives_tags: [], nutriments: {}, nutrient_levels: {}, categories_tags: []
   };
 }
@@ -268,11 +365,9 @@ async function lookupProduct(ean){
     cache.set(ean, product);
     return product;
   }
-  // 3) нет нигде → ИИ-заглушка (единственная платная ветка)
-  trace(`нет в OFF → <span class="stub">ИИ-распознавание (заглушка $)</span> · сохранено в кэш`);
-  product = await recognizeWithAI(ean);
-  cache.set(ean, product);
-  return product;
+  // 3) нет нигде → нужен снимок упаковки (распознавание запустит кнопка)
+  trace(`нет в OFF → <span class="stub">нужно фото упаковки</span>`);
+  return { _needPhoto: true, code: ean };
 }
 
 /* ================================================================
@@ -282,14 +377,159 @@ async function render(ean){
   ean = (ean||"").trim();
   if (!/^\d{6,14}$/.test(ean)){ trace(`введите штрих-код (только цифры)`); return; }
 
+  // прячем прошлую карточку и блок фото, пока идёт поиск нового кода
+  el("card").classList.add("hidden");
+  el("card").innerHTML = "";
+  el("photoAsk").classList.remove("on");
+
   const product = await lookupProduct(ean);
 
-  // платные слои — параллельно, поверх готового товара
-  const [prices, lab] = await Promise.all([fetchPrices(ean), fetchLabRating(product)]);
+  // товара нет нигде → показать блок съёмки и ждать пользователя
+  if (product && product._needPhoto){
+    // сброс к исходному виду
+    backFile = null; frontFile = null;
+    el("doneBack").classList.remove("on"); el("doneFront").classList.remove("on");
+    el("btnBack").textContent = "📷 Снять оборот"; el("btnFront").textContent = "📷 Снять лицевую";
+    el("btnRecognize").disabled = true; el("btnRecognize").textContent = "Распознать";
+    el("photoAsk").classList.add("on");
+    pendingEan = ean;
+    return;
+  }
 
-  const img = product.image_front_small_url;
-  const ns = product.nutriscore_grade;
-  const nova = product.nova_group;
+  drawCard(product, ean);
+}
+
+// отрисовка карточки по готовому товару + платные слои
+/* ================================================================
+   РАСЧЁТ ОЦЕНОК из состава/БЖУ (для товаров без готовых оценок)
+   ----------------------------------------------------------------
+   Nutri-Score — алгоритм редакции 2023 (публичная формула, твёрдая пища).
+   NOVA — классификация по маркерам переработки в составе.
+   Пороги Nutri-Score сверены с эталонными компонентами OFF.
+   Ограничение: реализована схема для ТВЁРДОЙ пищи. Напитки, жиры/масла/орехи,
+   сыр и красное мясо в 2023 считаются по особым правилам — здесь не учтены.
+   ================================================================ */
+
+// таблица баллов: возвращает индекс первого порога, который НЕ превышен
+function pts(value, thresholds){
+  for (let i = 0; i < thresholds.length; i++){ if (value <= thresholds[i]) return i; }
+  return thresholds.length;
+}
+
+// Nutri-Score РЕДАКЦИЯ 2023 для твёрдой пищи (не напитки/жиры/сыр — у них свои правила).
+// Пороги сверены с эталонными компонентами OFF (Almighurt: 1+2+1+0 −1 = 3 → C).
+function computeNutriScore(n){
+  const kj    = n["energy-kj_100g"] ?? (n["energy-kcal_100g"] != null ? n["energy-kcal_100g"] * 4.184 : null);
+  const sugar = n["sugars_100g"];
+  const satfat= n["saturated-fat_100g"];
+  const salt  = n["salt_100g"];
+  const prot  = n["proteins_100g"];
+  if (kj == null || sugar == null || satfat == null || salt == null) return null;
+
+  const fiber = n["fiber_100g"] ?? 0;
+  const fvl   = n["fruits-vegetables-legumes-estimate-from-ingredients_100g"] ?? 0; // %
+
+  // --- негативные баллы (2023) ---
+  const pEnergy = pts(kj,    [335,670,1005,1340,1675,2010,2345,2680,3015,3350]);          // 0..10
+  const pSugar  = pts(sugar, [3.4,6.8,10,14,17,20,24,27,31,34,37,41,44,48,51]);           // 0..15
+  const pSat    = pts(satfat,[1,2,3,4,5,6,7,8,9,10]);                                      // 0..10
+  const pSalt   = pts(salt,  [0.2,0.4,0.6,0.8,1.0,1.2,1.4,1.6,1.8,2.0,2.2,2.4,2.6,2.8,3.0,3.2,3.4,3.6,3.8,4.0]); // 0..20 (в граммах)
+  const N = pEnergy + pSugar + pSat + pSalt;
+
+  // --- позитивные баллы (2023) ---
+  const pFvl   = fvl>80?5 : fvl>60?2 : fvl>40?1 : 0;              // 0..5
+  const pFiber = pts(fiber, [3.0,4.1,5.2,6.3,7.4]);              // 0..5
+  const pProt  = pts(prot ?? 0, [2.4,4.8,7.2,9.6,12,14,17]);    // 0..7
+
+  // белок не учитывается, если N≥11 и мало фруктов/овощей
+  const P = pFvl + pFiber + ((N >= 11 && pFvl < 5) ? 0 : pProt);
+  const score = N - P;
+
+  // пороги оценок 2023 (твёрдая пища)
+  const grade = score <= 0 ? "a" : score <= 2 ? "b" : score <= 10 ? "c" : score <= 18 ? "d" : "e";
+  return grade;
+}
+
+// NOVA по составу (маркеры на DE и EN — модель отдаёт состав как на упаковке)
+function computeNova(ingredientsText){
+  if (!ingredientsText) return null;
+  const t = ingredientsText.toLowerCase();
+
+  // маркеры ультра-переработки → NOVA 4
+  const ultra = [
+    /e\s?\d{3}/,                              // E-номера (E160a и т.п.)
+    /aroma|flavour|flavor/,                    // ароматизаторы
+    /farbstoff|colour|color|carotin/,          // красители
+    /emulgator|emulsifier|lecithin|lezithin/,  // эмульгаторы
+    /süßungsmittel|sweetener|aspartam|sucralose|acesulfam/,
+    /modifizierte stärke|modified starch/,     // модиф. крахмал
+    /glukose-fruktose|glucose-fructose|maltodextrin|invertzucker|dextrose/,
+    /gehärtet|hydrogenated|isolat|isolate/
+  ];
+  if (ultra.some(re => re.test(t))) return 4;
+
+  // добавленные сахар/соль/масло → NOVA 3 (обработанный)
+  if (/zucker|sugar|salz|salt|meersalz|öl|oel|\boil\b/.test(t)) return 3;
+
+  // иначе — минимально обработанный
+  return 1;
+}
+
+/* ================================================================
+   ГЕЙТ КАЧЕСТВА ДАННЫХ OFF
+   ----------------------------------------------------------------
+   OFF отдаёт неравномерные данные: по брендам чисто, по немецким
+   приватным маркам состав часто распознан мусором (кейс Milbona).
+   Гейт оценивает слои и решает, каким верить, а каким — нет.
+   Принцип: лучше честное "не удалось проверить", чем ложный зелёный.
+   ================================================================ */
+function assessDataQuality(product){
+  const p = product || {};
+  const reasons = [];
+  const ingN     = Number(p.ingredients_n) || 0;
+  const unknownN = Number(p.unknown_ingredients_n) || 0;
+  const states   = Array.isArray(p.states_tags) ? p.states_tags : [];
+  const hasIngText = !!(p.ingredients_text_with_allergens && p.ingredients_text_with_allergens.trim());
+
+  // Состав "грязный", если распознано плохо (>1/3 не распознано) или OFF пометил незавершённым
+  let ingredientsDirty = false;
+  if (ingN > 0 && unknownN / ingN > 0.34){
+    ingredientsDirty = true;
+    reasons.push(`состав распознан плохо (${unknownN}/${ingN} не распознано)`);
+  } else if (hasIngText && states.includes("en:ingredients-to-be-completed")){
+    ingredientsDirty = true;
+    reasons.push("OFF пометил состав как незавершённый");
+  }
+
+  // Аллергенам нельзя верить, если тегов нет ПРИ битом составе
+  // (иначе молоко у молочного продукта тихо не подсветится)
+  const allergens = Array.isArray(p.allergens_tags) ? p.allergens_tags : [];
+  const allergensReliable = !(allergens.length === 0 && ingredientsDirty);
+  if (!allergensReliable) reasons.push("аллергены: тегов нет при битом составе");
+
+  // NOVA считается из состава → на грязном составе ненадёжен
+  const novaReliable = !ingredientsDirty;
+
+  // Нужен AI-перечит фото, если сломан слой, который фото чинит
+  const needsAI = ingredientsDirty || !allergensReliable;
+
+  return { ingredientsDirty, allergensReliable, novaReliable, needsAI, reasons };
+}
+
+async function drawCard(product, ean){
+  const [prices, lab] = await Promise.all([fetchPrices(ean), fetchLabRating(product)]);
+  const dq = assessDataQuality(product);   // ← оценка качества данных
+
+  const img = product.image_front_small_url || product._userPhoto;
+  const nmt = product.nutriments || {};
+
+  // оценки: берём из OFF, если есть; иначе считаем сами (распознанные / неполные записи)
+  let ns = product.nutriscore_grade;
+  let nova = product.nova_group;
+  let nsComputed = false, novaComputed = false;
+  if (!ns){ const g = computeNutriScore(nmt); if (g){ ns = g; nsComputed = true; } }
+  if (!nova){ const v = computeNova(product.ingredients_text_with_allergens); if (v){ nova = v; novaComputed = true; } }
+
   const eco = product.ecoscore_grade;
   const nsColor = {a:"var(--na)",b:"var(--nb)",c:"var(--nc)",d:"var(--nd)",e:"var(--ne)"}[ns] || "#c9cbc4";
   const ecoColor = {a:"var(--na)",b:"var(--nb)",c:"var(--nc)",d:"var(--nd)",e:"var(--ne)"}[eco] || "#c9cbc4";
@@ -302,6 +542,10 @@ async function render(ean){
   else if (ana.includes("en:may-contain-palm-oil")) flags.push(`<span class="flag warn">возможно пальмовое масло</span>`);
   if (ana.includes("en:vegan")) flags.push(`<span class="flag">веганский</span>`);
   else if (ana.includes("en:non-vegan")) flags.push(`<span class="flag">не веганский</span>`);
+
+  // --- честные флаги от гейта качества (не показываем ложный зелёный) ---
+  if (dq.ingredientsDirty)      flags.unshift(`<span class="flag warn">⚠ состав распознан плохо</span>`);
+  if (!dq.allergensReliable)    flags.push(`<span class="flag warn">аллергены: не удалось проверить</span>`);
 
   const n = product.nutriments||{};
   const lv = product.nutrient_levels||{};
@@ -338,12 +582,16 @@ async function render(ean){
     labBlock = `<div class="empty" style="padding:8px 0">Тест лаборатории по этой категории пока не занесён</div>`;
   }
 
+  const novaUnsure = nova && !dq.novaReliable;   // NOVA из грязного состава — не уверены
+  const novaColor = novaUnsure ? "#c9cbc4" : ({1:"var(--na)",2:"var(--nb)",3:"var(--nd)",4:"var(--ne)"}[nova] || "#c9cbc4");
+  const novaLabel = novaUnsure ? "не уверенно" : ({1:"необр.",2:"ингред.",3:"обработан",4:"ультра-обр."}[nova] || "");
+  const mark = (on) => on ? '<small>расчёт</small>' : '';
   const scoresBlock = (ns||nova||eco) ? `
     <div class="scores">
-      <div class="score" style="background:${nsColor}"><span class="lbl">Nutri-Score</span><span class="val">${ns?ns.toUpperCase():"—"}</span></div>
-      <div class="score" style="background:${nova?'var(--ne)':'#c9cbc4'}"><span class="lbl">NOVA</span><span class="val">${nova||"—"}</span>${nova==4?'<small>ультра-обр.</small>':''}</div>
-      <div class="score" style="background:${ecoColor}"><span class="lbl">Eco-Score</span><span class="val">${eco?eco.toUpperCase():"—"}</span></div>
-    </div>` : `<div class="empty" style="padding:8px 0">Оценки появятся после распознавания состава</div>`;
+      <div class="score" style="background:${nsColor}"><span class="lbl">Nutri-Score</span><span class="val">${ns?ns.toUpperCase():"—"}</span>${mark(nsComputed)}</div>
+      <div class="score" style="background:${novaColor}"><span class="lbl">NOVA</span><span class="val">${nova||"—"}</span>${nova?('<small>'+novaLabel+'</small>'):''}${(novaComputed&&!novaUnsure)?mark(true):''}</div>
+      <div class="score" style="background:${ecoColor}"><span class="lbl">Eco-Score</span><span class="val">${eco?eco.toUpperCase():"—"}</span>${!eco?'<small>нет данных</small>':''}</div>
+    </div>${(nsComputed||novaComputed)?'<div style="font-size:10.5px;color:var(--muted);margin-top:8px">Оценки с пометкой «расчёт» вычислены из состава и БЖУ, а не взяты из базы — возможны неточности.</div>':''}` : `<div class="empty" style="padding:8px 0">Оценки появятся после распознавания состава</div>`;
 
   el("card").classList.remove("hidden");
   el("card").innerHTML = `
@@ -389,6 +637,36 @@ async function render(ean){
    ВСПОМОГАТЕЛЬНОЕ + СОБЫТИЯ
    ================================================================ */
 function wait(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+// Любое фото → JPEG (base64). Через canvas: решает HEIC с iPhone и ужимает большие снимки.
+function fileToBase64(file){
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      // ужимаем до макс. 1600px по большей стороне — достаточно для чтения текста
+      const maxSide = 1600;
+      let { width, height } = img;
+      if (Math.max(width, height) > maxSide){
+        const k = maxSide / Math.max(width, height);
+        width = Math.round(width * k);
+        height = Math.round(height * k);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width; canvas.height = height;
+      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.85);   // всегда JPEG
+      resolve({ base64: dataUrl.split(",")[1], mediaType: "image/jpeg" });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      // если браузер не смог отрисовать (например, HEIC в старом браузере) — честная ошибка
+      reject(new Error("не удалось прочитать фото (попробуй JPEG/PNG)"));
+    };
+    img.src = url;
+  });
+}
 
 el("go").addEventListener("click", ()=>render(el("ean").value));
 el("ean").addEventListener("keydown", e=>{ if(e.key==="Enter") render(el("ean").value); });
@@ -451,6 +729,47 @@ function onScan(text){
 }
 
 camBtn.addEventListener("click", ()=>{ scanning ? stopCamera() : startCamera(); });
+
+/* ---- запрос фото нового товара: оборот (обязат.) + лицевая (опц.) ---- */
+let pendingEan = null;
+let backFile = null, frontFile = null;   // выбранные фото
+const photoAsk = el("photoAsk");
+const btnBack = el("btnBack"), btnFront = el("btnFront"), btnRecognize = el("btnRecognize");
+const inpBack = el("inpBack"), inpFront = el("inpFront");
+const doneBack = el("doneBack"), doneFront = el("doneFront");
+
+// клики по кнопкам открывают выбор файла (прямой жест — браузер не блокирует)
+btnBack.addEventListener("click", ()=> inpBack.click());
+btnFront.addEventListener("click", ()=> inpFront.click());
+
+inpBack.addEventListener("change", ()=>{
+  backFile = inpBack.files[0] || null; inpBack.value = "";
+  if (backFile){ doneBack.textContent = "✓ оборот снят — можно переснять"; doneBack.classList.add("on"); btnBack.textContent = "📷 Переснять оборот"; }
+  btnRecognize.disabled = !backFile;    // распознавать можно, как только есть оборот
+});
+inpFront.addEventListener("change", ()=>{
+  frontFile = inpFront.files[0] || null; inpFront.value = "";
+  if (frontFile){ doneFront.textContent = "✓ лицевая снята"; doneFront.classList.add("on"); btnFront.textContent = "📷 Переснять лицевую"; }
+});
+
+btnRecognize.addEventListener("click", async ()=>{
+  if (!backFile || !pendingEan) return;
+  btnRecognize.disabled = true; btnRecognize.textContent = "Распознаю…";
+  // иконкой станет лицевая, если снята, иначе — оборот
+  let userPhotoUrl = null;
+  try { userPhotoUrl = URL.createObjectURL(frontFile || backFile); } catch(e){}
+  // порядок: сначала оборот (там состав/БЖУ), затем лицевая
+  const product = await recognizeWithAI(pendingEan, [backFile, frontFile]);
+  if (userPhotoUrl && !product._failed) product._userPhoto = userPhotoUrl;
+  if (!product._failed) cache.set(pendingEan, product);
+  photoAsk.classList.remove("on");
+  drawCard(product, pendingEan);
+  // сброс состояния
+  pendingEan = null; backFile = null; frontFile = null;
+  btnRecognize.textContent = "Распознать"; btnRecognize.disabled = true;
+  btnBack.textContent = "📷 Снять оборот"; btnFront.textContent = "📷 Снять лицевую";
+  doneBack.classList.remove("on"); doneFront.classList.remove("on");
+});
 
 // первый показ
 render(el("ean").value);
