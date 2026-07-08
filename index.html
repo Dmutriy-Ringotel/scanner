@@ -401,6 +401,28 @@ async function fetchLabRating(product){
 /* ================================================================
    ОРКЕСТРАТОР — тот самый алгоритм скана
    ================================================================ */
+
+// В OFF по ошибке заносят косметику (шампуни, лаки, кремы). Детектор ловит это,
+// чтобы не рисовать лак как еду. Два признака: косметическая категория ИЛИ
+// "нет нутриентов + нет категории, но есть состав" → это не еда.
+const COSMETIC_CATEGORY_HINTS = [
+  "cosmetic","beauty","hair","shampoo","hairspray","haarspray","haar","deodorant","deo",
+  "shower","dusch","soap","seife","toothpaste","zahnpasta","zahn","body-care","skin-care",
+  "face-care","makeup","make-up","perfume","parfum","lotion","sunscreen","sonnencreme",
+  "rasier","shaving","pflege","haut","creme-de-douche","gel-douche"
+];
+function looksLikeCosmetic(p){
+  const cats = (Array.isArray(p.categories_tags) ? p.categories_tags : []).map(c=>c.toLowerCase());
+  // 1) название/бренд/категории содержат косметический маркер (ловит "haarspray syoss")
+  const text = ((p.product_name||"") + " " + (p.brands||"") + " " + cats.join(" ")).toLowerCase();
+  if (COSMETIC_CATEGORY_HINTS.some(h => text.includes(h))) return true;
+  // 2) состав похож на INCI (Aqua/Parfum/CI-номера/типичные ПАВы) — сильный признак косметики
+  const ing = (p.ingredients_text_with_allergens || p.ingredients_text || "").toLowerCase();
+  if (ing && (/\baqua\b/.test(ing) || /\bparfum\b/.test(ing) || /\bci \d{5}\b/.test(ing) ||
+              /sodium laureth|cocamidopropyl|glycerin.*sodium|dimethicone|phenoxyethanol/.test(ing))) return true;
+  return false;
+}
+
 async function lookupProduct(ean){
   // 1) свой кэш
   if (cache.has(ean)){
@@ -411,6 +433,15 @@ async function lookupProduct(ean){
   trace(`запрос в Open Food Facts…`);
   let product = await fetchFromOFF(ean);
   if (product){
+    // OFF иногда содержит косметику (лаки, шампуни) — переклассифицируем
+    if (looksLikeCosmetic(product)){
+      trace(`OFF вернул косметику → проверяю Open Beauty Facts…`);
+      const obf = await fetchFromOBF(ean);
+      const cos = obf || Object.assign(product, { _type: "cosmetic" });
+      trace(`<span class="hit">✓ косметика</span> · $0 · сохранено в кэш`);
+      cache.set(ean, cos);
+      return cos;
+    }
     trace(`<span class="hit">✓ Open Food Facts</span> · $0 · сохранено в кэш`);
     cache.set(ean, product);
     return product;
