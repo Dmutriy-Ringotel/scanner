@@ -129,6 +129,18 @@
   .cam-btn{width:100%; margin-top:8px; font-family:inherit; font-size:14px; font-weight:500; color:var(--blue); background:var(--blue-bg); border:1px solid #cfe0fb; border-radius:8px; padding:9px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px}
   .cam-btn:hover{background:#dde9fd}
   .cam-btn.active{color:var(--bad); background:#fbeae7; border-color:#f2c9c1}
+  /* кнопка "уточнить фото → ИИ" для товаров с битым составом */
+  .improve-btn{margin-top:10px; width:100%; font-family:inherit; font-size:13px; font-weight:500; color:var(--stub); background:var(--stub-bg); border:1px solid #f0d9ac; border-radius:8px; padding:9px; cursor:pointer}
+  .improve-btn:hover{background:#fbecd0}
+  /* косметика: вердикт + concern-строки */
+  .verdict{border-radius:8px; padding:10px 12px; color:#fff; font-weight:600; font-size:14px; text-align:center; margin-bottom:10px}
+  .concerns{display:flex; flex-direction:column; gap:6px}
+  .concern{border-left:3px solid var(--line-strong); padding:6px 10px; background:#f6f6f3; border-radius:6px}
+  .concern.high{border-left-color:var(--ne); background:#fbeae7}
+  .concern.med{border-left-color:var(--nc); background:var(--stub-bg)}
+  .concern-name{font-size:13px; font-weight:600}
+  .concern-why{font-size:11.5px; color:var(--muted); margin-top:1px}
+  .concern-src{color:var(--stub)}
   #reader{margin-top:10px; border-radius:10px; overflow:hidden; display:none}
   #reader.on{display:block}
   #reader video{border-radius:10px; display:block; width:100%}
@@ -161,7 +173,7 @@
 <div class="wrap">
   <header>
     <h1>Сканер продуктов · прототип</h1>
-    <p>Фаза 1 — Германия. Реальный поток кэш→OFF, платные слои на заглушках.</p>
+    <p>Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки.</p>
   </header>
 
   <div class="scan-box">
@@ -173,6 +185,8 @@
       <button data-ean="4002971067309">Ehrmann Almighurt</button>
       <button data-ean="3017620422003">Nutella</button>
       <button data-ean="5449000000996">Coca-Cola</button>
+      <button data-ean="42277255">Nivea Creme 🧴</button>
+      <button data-ean="4058172675379">Balea Handcreme 🧴</button>
       <button data-ean="1111111111111">Новый товар → ИИ</button>
     </div>
     <button class="cam-btn" id="camBtn"><span>📷</span> Сканировать камерой</button>
@@ -225,6 +239,8 @@
    КОНФИГ
    ================================================================ */
 const OFF_ENDPOINT = "https://world.openfoodfacts.org/api/v2/product/";
+// Open Beauty Facts — сестринская база косметики (тот же API). Роутер: OFF → OBF → фото.
+const OBF_ENDPOINT = "https://world.openbeautyfacts.org/api/v2/product/";
 // Адрес локального посредника для ИИ-распознавания (см. папку ai-proxy).
 // Пусто → распознавание выключено (прототип работает, но новые товары не распознаёт).
 const AI_PROXY_URL = "http://localhost:8787/recognize";
@@ -235,6 +251,11 @@ const OFF_FIELDS = [
   "nutriments","nutrient_levels","categories_tags",
   // --- поля для гейта качества данных (видеть "грязный" состав, кейс Milbona) ---
   "ingredients_n","unknown_ingredients_n","states_tags"
+].join(",");
+const OBF_FIELDS = [
+  "product_name","brands","quantity","image_front_small_url",
+  "ingredients_text_with_allergens","ingredients_text","allergens_tags",
+  "categories_tags","ingredients_n","unknown_ingredients_n","states_tags"
 ].join(",");
 
 /* Кэш в памяти сессии. В реальном приложении — своя БД (та самая "своя база"). */
@@ -255,9 +276,27 @@ async function fetchFromOFF(ean){
   // status 1 И код в ответе совпадает с запрошенным (OFF на «мусорных» кодах
   // иногда отдаёт status 0 с телом от другого товара — такое отбрасываем)
   if (data.status === 1 && data.product && String(data.product.code) === String(ean)){
+    data.product._type = "food";
     return data.product;
   }
-  return null; // товара нет (cache miss) → пойдём в ИИ-распознавание
+  return null; // товара нет в OFF → пробуем OBF (косметика)
+}
+
+// Запрос в Open Beauty Facts (косметика). Тот же API, помечаем _type = cosmetic.
+async function fetchFromOBF(ean){
+  try{
+    const url = `${OBF_ENDPOINT}${ean}.json?fields=code,${OBF_FIELDS}`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.status === 1 && data.product && String(data.product.code) === String(ean)){
+      const p = data.product;
+      p._type = "cosmetic";
+      // унифицируем поле состава (OBF может отдать только ingredients_text)
+      if (!p.ingredients_text_with_allergens && p.ingredients_text) p.ingredients_text_with_allergens = p.ingredients_text;
+      return p;
+    }
+  }catch(e){ /* OBF недоступен — просто вернём null */ }
+  return null;
 }
 
 // ---- ИИ-распознавание фото нового товара --------------------------
@@ -312,6 +351,17 @@ function notRecognized(ean, msg){
   };
 }
 
+// РЕЖИМ "УТОЧНИТЬ": ИИ перечитал состав с фото — вливаем ТОЛЬКО состав/аллергены
+// в уже имеющиеся данные OFF (не теряем нутриенты/название/картинку/оценки).
+function mergeAIintoProduct(base, ai){
+  const merged = Object.assign({}, base);
+  if (ai.ingredients_text_with_allergens) merged.ingredients_text_with_allergens = ai.ingredients_text_with_allergens;
+  if (Array.isArray(ai.allergens_tags) && ai.allergens_tags.length) merged.allergens_tags = ai.allergens_tags;
+  merged._aiEnhanced = true;         // гейт теперь считает состав чистым
+  merged.unknown_ingredients_n = 0;  // и по счётчику — состав перечитан
+  return merged;
+}
+
 /* ================================================================
    СЛОЙ 2 — ЦЕНЫ  ($$ платно)
    ================================================================ */
@@ -357,7 +407,7 @@ async function lookupProduct(ean){
     trace(`<span class="hit">✓ найдено в кэше</span> · $0`);
     return cache.get(ean);
   }
-  // 2) Open Food Facts
+  // 2) Open Food Facts (еда)
   trace(`запрос в Open Food Facts…`);
   let product = await fetchFromOFF(ean);
   if (product){
@@ -365,8 +415,16 @@ async function lookupProduct(ean){
     cache.set(ean, product);
     return product;
   }
-  // 3) нет нигде → нужен снимок упаковки (распознавание запустит кнопка)
-  trace(`нет в OFF → <span class="stub">нужно фото упаковки</span>`);
+  // 3) Open Beauty Facts (косметика)
+  trace(`нет в OFF → запрос в Open Beauty Facts…`);
+  let cosmetic = await fetchFromOBF(ean);
+  if (cosmetic){
+    trace(`<span class="hit">✓ Open Beauty Facts</span> · $0 · косметика · сохранено в кэш`);
+    cache.set(ean, cosmetic);
+    return cosmetic;
+  }
+  // 4) нет нигде → нужен снимок упаковки (распознавание запустит кнопка)
+  trace(`нет в OFF/OBF → <span class="stub">нужно фото упаковки</span>`);
   return { _needPhoto: true, code: ean };
 }
 
@@ -384,19 +442,19 @@ async function render(ean){
 
   const product = await lookupProduct(ean);
 
-  // товара нет нигде → показать блок съёмки и ждать пользователя
+  // товара нет нигде → показать блок съёмки (режим "с нуля")
   if (product && product._needPhoto){
-    // сброс к исходному виду
-    backFile = null; frontFile = null;
-    el("doneBack").classList.remove("on"); el("doneFront").classList.remove("on");
-    el("btnBack").textContent = "📷 Снять оборот"; el("btnFront").textContent = "📷 Снять лицевую";
-    el("btnRecognize").disabled = true; el("btnRecognize").textContent = "Распознать";
-    el("photoAsk").classList.add("on");
-    pendingEan = ean;
+    openPhotoAsk(ean, null);
     return;
   }
 
-  drawCard(product, ean);
+  showProduct(product, ean);
+}
+
+// Диспетчер: косметику рисуем отдельной карточкой, еду — прежней.
+function showProduct(product, ean){
+  if (product && product._type === "cosmetic") drawCosmeticCard(product, ean);
+  else drawCard(product, ean);
 }
 
 // отрисовка карточки по готовому товару + платные слои
@@ -482,38 +540,82 @@ function computeNova(ingredientsText){
    приватным маркам состав часто распознан мусором (кейс Milbona).
    Гейт оценивает слои и решает, каким верить, а каким — нет.
    Принцип: лучше честное "не удалось проверить", чем ложный зелёный.
+   ВАЖНО: у односоставных/сырьевых продуктов (молоко, сливки, вода...)
+   высокая доля "unknown" — это НЕ грязь, а слова обработки. ИИ там
+   бесполезен, поэтому такие случаи отфильтровываем ("ложная грязь").
    ================================================================ */
+
+// Сырьевые категории, где полный список ингредиентов не нужен (1 ингредиент по сути).
+const RAW_CATEGORY_HINTS = ["milk","cream","butter","water","flour","sugar","salt","egg","honey","oil-and-fat"];
+// Слова-описания обработки — это НЕ ингредиенты (DE + EN).
+const PROCESSING_WORDS = /pasteuris|homogenis|hocherhitzt|ultrahocherhitzt|\buht\b|haltbar|entrahmt|teilentrahmt|\bfett\b|i\.?\s?tr|\broh\b|frisch|gekühlt|laktosefrei|glutenfrei|whole|fresh|semi-?skimmed|skimmed/i;
+// Категория → аллерген (когда состав неполон, но категория известна).
+const CATEGORY_ALLERGEN = [
+  {hint:"milk",allergen:"en:milk"},{hint:"cream",allergen:"en:milk"},
+  {hint:"butter",allergen:"en:milk"},{hint:"cheese",allergen:"en:milk"},
+  {hint:"yogurt",allergen:"en:milk"},{hint:"egg",allergen:"en:eggs"},
+];
+// Похоже ли на односоставный продукт: убрав слова обработки и "3.5% Fett", остаётся ≤2 токена.
+function looksSingleIngredient(text){
+  if (!text) return false;
+  const tokens = text.split(/[,;()]/).map(s=>s.trim()).filter(Boolean);
+  const real = tokens.filter(t => !PROCESSING_WORDS.test(t) && !/^\s*\d/.test(t));
+  return real.length <= 2;
+}
+
 function assessDataQuality(product){
   const p = product || {};
   const reasons = [];
   const ingN     = Number(p.ingredients_n) || 0;
   const unknownN = Number(p.unknown_ingredients_n) || 0;
   const states   = Array.isArray(p.states_tags) ? p.states_tags : [];
+  const cats     = (Array.isArray(p.categories_tags) ? p.categories_tags : []).map(c=>c.toLowerCase());
   const hasIngText = !!(p.ingredients_text_with_allergens && p.ingredients_text_with_allergens.trim());
 
-  // Состав "грязный", если распознано плохо (>1/3 не распознано) или OFF пометил незавершённым
+  // Сырьевая/односоставная категория → ИИ не поможет ("ложная грязь")
+  const isRawCategory = cats.some(c => RAW_CATEGORY_HINTS.some(h => c.includes(h)));
+  const falseDirt = isRawCategory || looksSingleIngredient(p.ingredients_text_with_allergens);
+
+  // "ПУСТОЙ": состава нет вовсе (только для товаров из OFF).
+  const ingredientsMissing = !p._aiEnhanced && !p._ai && !hasIngText;
+  if (ingredientsMissing) reasons.push("состав отсутствует в OFF");
+
+  // "ГРЯЗНЫЙ": состав есть, распознан плохо — И это НЕ ложная грязь.
   let ingredientsDirty = false;
-  if (ingN > 0 && unknownN / ingN > 0.34){
-    ingredientsDirty = true;
-    reasons.push(`состав распознан плохо (${unknownN}/${ingN} не распознано)`);
+  if (p._aiEnhanced){
+    // перечитан ИИ — доверяем
+  } else if (ingN > 0 && unknownN / ingN > 0.34){
+    if (falseDirt){
+      reasons.push("односоставный/сырьевой продукт — ИИ не требуется");
+    } else {
+      ingredientsDirty = true;
+      reasons.push(`состав распознан плохо (${unknownN}/${ingN} не распознано)`);
+    }
   } else if (hasIngText && states.includes("en:ingredients-to-be-completed")){
     ingredientsDirty = true;
     reasons.push("OFF пометил состав как незавершённый");
   }
 
-  // Аллергенам нельзя верить, если тегов нет ПРИ битом составе
-  // (иначе молоко у молочного продукта тихо не подсветится)
+  // Аллерген из категории, если тегов нет, но категория его подразумевает (молоко → milk).
   const allergens = Array.isArray(p.allergens_tags) ? p.allergens_tags : [];
-  const allergensReliable = !(allergens.length === 0 && ingredientsDirty);
-  if (!allergensReliable) reasons.push("аллергены: тегов нет при битом составе");
+  let categoryAllergen = null;
+  if (allergens.length === 0){
+    const hit = CATEGORY_ALLERGEN.find(ca => cats.some(c => c.includes(ca.hint)));
+    if (hit) categoryAllergen = hit.allergen;
+  }
 
-  // NOVA считается из состава → на грязном составе ненадёжен
-  const novaReliable = !ingredientsDirty;
+  // Аллергенам верим, если: тег есть ИЛИ выводится из категории ИЛИ состав в норме.
+  let allergensReliable;
+  if (allergens.length > 0 || categoryAllergen) allergensReliable = true;
+  else if (ingredientsDirty || ingredientsMissing) allergensReliable = false;
+  else allergensReliable = true;
+  if (!allergensReliable) reasons.push("аллергены: тегов нет при битом/пустом составе");
 
-  // Нужен AI-перечит фото, если сломан слой, который фото чинит
-  const needsAI = ingredientsDirty || !allergensReliable;
+  const novaReliable = !ingredientsDirty && !ingredientsMissing;
+  // ИИ нужен, если состав грязный ИЛИ пусто (но НЕ на сырьевой категории) ИЛИ аллергены ненадёжны.
+  const needsAI = ingredientsDirty || (ingredientsMissing && !isRawCategory) || !allergensReliable;
 
-  return { ingredientsDirty, allergensReliable, novaReliable, needsAI, reasons };
+  return { ingredientsDirty, ingredientsMissing, allergensReliable, novaReliable, needsAI, reasons, categoryAllergen };
 }
 
 async function drawCard(product, ean){
@@ -534,7 +636,8 @@ async function drawCard(product, ean){
   const nsColor = {a:"var(--na)",b:"var(--nb)",c:"var(--nc)",d:"var(--nd)",e:"var(--ne)"}[ns] || "#c9cbc4";
   const ecoColor = {a:"var(--na)",b:"var(--nb)",c:"var(--nc)",d:"var(--nd)",e:"var(--ne)"}[eco] || "#c9cbc4";
 
-  const alg = (product.allergens_tags||[]).map(a=>a.replace(/^en:/,""));
+  let alg = (product.allergens_tags||[]).map(a=>a.replace(/^en:/,""));
+  if (alg.length === 0 && dq.categoryAllergen) alg = [dq.categoryAllergen.replace(/^en:/,"")];  // аллерген из категории
   const ana = product.ingredients_analysis_tags||[];
   const flags = [];
   alg.forEach(a => flags.push(`<span class="flag bad">аллерген: ${a}</span>`));
@@ -544,8 +647,9 @@ async function drawCard(product, ean){
   else if (ana.includes("en:non-vegan")) flags.push(`<span class="flag">не веганский</span>`);
 
   // --- честные флаги от гейта качества (не показываем ложный зелёный) ---
-  if (dq.ingredientsDirty)      flags.unshift(`<span class="flag warn">⚠ состав распознан плохо</span>`);
-  if (!dq.allergensReliable)    flags.push(`<span class="flag warn">аллергены: не удалось проверить</span>`);
+  if (dq.ingredientsDirty)                      flags.unshift(`<span class="flag warn">⚠ состав распознан плохо</span>`);
+  else if (dq.ingredientsMissing && dq.needsAI) flags.unshift(`<span class="flag warn">⚠ состав не занесён в OFF</span>`);
+  if (!dq.allergensReliable)                    flags.push(`<span class="flag warn">аллергены: не удалось проверить</span>`);
 
   const n = product.nutriments||{};
   const lv = product.nutrient_levels||{};
@@ -607,6 +711,7 @@ async function drawCard(product, ean){
       <div class="layer-top"><span class="layer-name">Здоровье</span><span class="tag free">OFF · $0</span></div>
       ${scoresBlock}
       ${flags.length?`<div class="flags">${flags.join("")}</div>`:""}
+      ${dq.needsAI?`<button class="improve-btn" id="improveBtn">📷 Уточнить фото → ИИ</button>`:""}
     </div>
 
     ${nutriRows?`<div class="layer">
@@ -631,6 +736,105 @@ async function drawCard(product, ean){
 
     <div class="attr">Данные о составе © Open Food Facts (ODbL). Цены и оценки лабораторий — демо-заглушки.</div>
   `;
+
+  // кнопка "уточнить фото → ИИ" (режим improve): чиним состав поверх данных OFF
+  if (dq.needsAI){
+    const ib = el("improveBtn");
+    if (ib) ib.addEventListener("click", ()=> openPhotoAsk(ean, product));
+  }
+}
+
+/* ================================================================
+   КОСМЕТИКА — скоринг состава (INCI) + карточка
+   ----------------------------------------------------------------
+   OBF даёт INCI и отдушки-аллергены, но НЕ оценку. Скоринг строим сами:
+   маленький регуляторно обоснованный список "поводов для внимания".
+   Оцениваем ВЕЩЕСТВО (с источником), а не "продукт плохой" — защитно.
+   Список стартовый — дополняется по мере тестов на живых марках.
+   ================================================================ */
+const INCI_CONCERNS = [
+  { re:/\bbutylparaben\b|\bpropylparaben\b|\bisobutylparaben\b|\bisopropylparaben\b/i, sev:"high", reason:"парабен — потенциальное гормональное действие", src:"EU SCCS" },
+  { re:/\bmethylisothiazolinone\b|\bmethylchloroisothiazolinone\b/i, sev:"high", reason:"MI/MCI — сильный контактный аллерген, ограничен в ЕС", src:"EU 1223/2009" },
+  { re:/\bdmdm hydantoin\b|\bimidazolidinyl urea\b|\bdiazolidinyl urea\b|\bquaternium-15\b/i, sev:"high", reason:"высвобождает формальдегид", src:"EU SCCS" },
+  { re:/\btriclosan\b/i, sev:"high", reason:"антибактериальное — ограничено, экология", src:"EU 1223/2009" },
+  { re:/\baluminum chlorohydrate\b|\baluminium chlorohydrate\b|\baluminum zirconium|\baluminium zirconium/i, sev:"med", reason:"соль алюминия (антиперспиранты) — предмет споров", src:"BfR/Öko-Test" },
+  { re:/\boctocrylene\b|\bhomosalate\b|\bethylhexyl methoxycinnamate\b/i, sev:"med", reason:"UV-фильтр — обсуждается гормональное действие", src:"EU SCCS" },
+  { re:/\bpolyethylene\b|\bnylon-12\b|\bacrylates crosspolymer\b/i, sev:"med", reason:"синтетический полимер / микропластик", src:"BUND" },
+];
+
+function scoreCosmetic(product){
+  const text = product.ingredients_text_with_allergens || product.ingredients_text || "";
+  const allergens = (product.allergens_tags || []).map(a => a.replace(/^..:/, ""));
+  const concerns = [];
+  for (const c of INCI_CONCERNS){
+    const m = text.match(c.re);
+    if (m) concerns.push({ name:m[0], sev:c.sev, reason:c.reason, src:c.src });
+  }
+  const hasHigh = concerns.some(c => c.sev === "high");
+  const hasMed  = concerns.some(c => c.sev === "med");
+  let label, color;
+  if (hasHigh){ label = "Есть повод для внимания"; color = "red"; }
+  else if (hasMed || allergens.length){ label = "В целом ок, есть нюансы"; color = "yellow"; }
+  else { label = "Без явных поводов"; color = "green"; }
+  return { label, color, concerns, fragranceAllergens: allergens };
+}
+
+async function drawCosmeticCard(product, ean){
+  const img = product.image_front_small_url || product._userPhoto;
+  const s = scoreCosmetic(product);
+  const vColor = { green:"var(--na)", yellow:"var(--nc)", red:"var(--ne)" }[s.color] || "#c9cbc4";
+
+  // гейт для INCI: порог выше (таксономия косметики слабее, чем у еды)
+  const ingN = Number(product.ingredients_n) || 0, unkN = Number(product.unknown_ingredients_n) || 0;
+  const inci = product.ingredients_text_with_allergens || product.ingredients_text || "";
+  const inciDirty = !product._aiEnhanced && ingN > 0 && unkN / ingN > 0.5;
+  const needsAI = !inci || inciDirty;
+
+  const concernRows = s.concerns.length ? s.concerns.map(c => `
+    <div class="concern ${c.sev}">
+      <div class="concern-name">${c.name}</div>
+      <div class="concern-why">${c.reason} · <span class="concern-src">${c.src}</span></div>
+    </div>`).join("") : `<div class="empty" style="padding:6px 0">Проблемных веществ из нашего списка не найдено</div>`;
+
+  const algFlags = s.fragranceAllergens.length
+    ? `<div class="flags">${s.fragranceAllergens.map(a => `<span class="flag warn">отдушка: ${a}</span>`).join("")}</div>` : "";
+
+  el("card").classList.remove("hidden");
+  el("card").innerHTML = `
+    <div class="card-head">
+      ${img ? `<img src="${img}" alt="">` : `<div class="ph">🧴</div>`}
+      <div>
+        <h2>${product.product_name || "Без названия"}</h2>
+        <div class="brand">${product.brands || "—"}${product.quantity ? " · " + product.quantity : ""} · косметика</div>
+      </div>
+    </div>
+
+    <div class="layer">
+      <div class="layer-top"><span class="layer-name">Оценка состава</span><span class="tag free">OBF · $0</span></div>
+      <div class="verdict" style="background:${vColor}">${s.label}</div>
+      ${inciDirty ? `<div class="flags"><span class="flag warn">⚠ INCI распознан плохо</span></div>` : ""}
+      <div class="concerns">${concernRows}</div>
+      ${algFlags}
+      ${needsAI ? `<button class="improve-btn" id="improveBtn">📷 Уточнить фото → ИИ</button>` : ""}
+    </div>
+
+    ${inci ? `<div class="layer">
+      <div class="layer-top"><span class="layer-name">Состав (INCI)</span><span class="tag free">OBF · $0</span></div>
+      <div class="ingredients">${inci}</div>
+    </div>` : ""}
+
+    <div class="layer">
+      <div class="layer-top"><span class="layer-name">Оценка лаборатории</span><span class="tag stub">заглушка · ~$0</span></div>
+      <div class="empty" style="padding:8px 0">Тест лаборатории по этой категории пока не занесён</div>
+    </div>
+
+    <div class="attr">Состав © Open Beauty Facts (ODbL). Оценки веществ — по регуляторным источникам (EU SCCS, BUND, Öko-Test). Не медицинская рекомендация.</div>
+  `;
+
+  if (needsAI){
+    const ib = el("improveBtn");
+    if (ib) ib.addEventListener("click", () => openPhotoAsk(ean, product));
+  }
 }
 
 /* ================================================================
@@ -733,10 +937,31 @@ camBtn.addEventListener("click", ()=>{ scanning ? stopCamera() : startCamera(); 
 /* ---- запрос фото нового товара: оборот (обязат.) + лицевая (опц.) ---- */
 let pendingEan = null;
 let backFile = null, frontFile = null;   // выбранные фото
+let photoMode = "new";                   // 'new' = товара нет в OFF | 'improve' = есть, но состав битый
+let improveBase = null;                  // базовый продукт OFF для режима improve
 const photoAsk = el("photoAsk");
 const btnBack = el("btnBack"), btnFront = el("btnFront"), btnRecognize = el("btnRecognize");
 const inpBack = el("inpBack"), inpFront = el("inpFront");
 const doneBack = el("doneBack"), doneFront = el("doneFront");
+
+// Единая точка открытия блока фото. baseProduct=null → режим "с нуля",
+// baseProduct=товар OFF → режим "уточнить" (ИИ перечитает состав поверх данных OFF).
+function openPhotoAsk(ean, baseProduct){
+  pendingEan   = ean;
+  improveBase  = baseProduct || null;
+  photoMode    = baseProduct ? "improve" : "new";
+  const title = photoAsk.querySelector(".pa-title");
+  if (title) title.textContent = (photoMode === "improve")
+    ? "Данных о составе не хватает. Сфотографируй оборот — ИИ прочитает состав и аллергены, остальное из OFF сохранится."
+    : "Товара нет в базе. Сфотографируй упаковку — данные распознает ИИ.";
+  // сброс UI
+  backFile = null; frontFile = null;
+  doneBack.classList.remove("on"); doneFront.classList.remove("on");
+  btnBack.textContent = "📷 Снять оборот"; btnFront.textContent = "📷 Снять лицевую";
+  btnRecognize.disabled = true; btnRecognize.textContent = "Распознать";
+  photoAsk.classList.add("on");
+  photoAsk.scrollIntoView({ behavior: "smooth", block: "center" });
+}
 
 // клики по кнопкам открывают выбор файла (прямой жест — браузер не блокирует)
 btnBack.addEventListener("click", ()=> inpBack.click());
@@ -759,13 +984,26 @@ btnRecognize.addEventListener("click", async ()=>{
   let userPhotoUrl = null;
   try { userPhotoUrl = URL.createObjectURL(frontFile || backFile); } catch(e){}
   // порядок: сначала оборот (там состав/БЖУ), затем лицевая
-  const product = await recognizeWithAI(pendingEan, [backFile, frontFile]);
-  if (userPhotoUrl && !product._failed) product._userPhoto = userPhotoUrl;
-  if (!product._failed) cache.set(pendingEan, product);
+  const ai = await recognizeWithAI(pendingEan, [backFile, frontFile]);
+
+  let product;
+  if (photoMode === "improve" && improveBase && !ai._failed){
+    // РЕЖИМ "УТОЧНИТЬ": вливаем состав/аллергены ИИ в данные OFF, остальное сохраняем
+    product = mergeAIintoProduct(improveBase, ai);
+    if (userPhotoUrl && !improveBase.image_front_small_url) product._userPhoto = userPhotoUrl;
+    cache.set(pendingEan, product);   // обновляем кэш почищенной версией
+  } else {
+    // РЕЖИМ "С НУЛЯ": товара не было в OFF — берём распознанный как есть
+    product = ai;
+    if (userPhotoUrl && !product._failed) product._userPhoto = userPhotoUrl;
+    if (!product._failed) cache.set(pendingEan, product);
+  }
+
   photoAsk.classList.remove("on");
-  drawCard(product, pendingEan);
+  showProduct(product, pendingEan);
   // сброс состояния
-  pendingEan = null; backFile = null; frontFile = null;
+  pendingEan = null; improveBase = null; photoMode = "new";
+  backFile = null; frontFile = null;
   btnRecognize.textContent = "Распознать"; btnRecognize.disabled = true;
   btnBack.textContent = "📷 Снять оборот"; btnFront.textContent = "📷 Снять лицевую";
   doneBack.classList.remove("on"); doneFront.classList.remove("on");
