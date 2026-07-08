@@ -934,31 +934,18 @@ async function startCamera(){
   });
   reader.classList.add("on");
   try{
-    // Выбираем КОНКРЕТНУЮ заднюю камеру, а не отдаём выбор Safari:
-    // он часто цепляет ультраширокую (0.5×), которая не фокусируется вблизи.
-    let cameraId = null;
-    try{
-      const cams = await Html5Qrcode.getCameras();   // спросит доступ к камере
-      if (cams && cams.length){
-        // ищем основную заднюю: back/rear/environment, но НЕ ultra/wide/tele/desk
-        const backs = cams.filter(c => /back|rear|environment|rück/i.test(c.label));
-        const pool = backs.length ? backs : cams;
-        const main = pool.find(c => !/ultra|wide|weit|tele|desk|front|face/i.test(c.label));
-        cameraId = (main || pool[pool.length - 1]).id;   // fallback: последняя задняя
-      }
-    }catch(e){ /* не смогли перечислить — уйдём на facingMode ниже */ }
-
-    const cameraSource = cameraId ? { deviceId: { exact: cameraId } } : { facingMode: "environment" };
-
+    // На iOS Safari метки камер часто пустые (приватность) → перечисление по названию
+    // промахивается (можно попасть на фронталку). Надёжнее прямо просить заднюю камеру
+    // через facingMode: environment и НЕ выбирать устройство вручную.
     await scanner.start(
-      cameraSource,
+      { facingMode: { exact: "environment" } },   // строго задняя камера
       {
         fps: 10,
         // qrbox НЕ задаём → сканируем весь кадр: для широких EAN-13 это заметно надёжнее,
         // чем узкая рамка, которая обрезает код.
         aspectRatio: 1.7777,
         videoConstraints: {
-          ...(cameraId ? { deviceId: { exact: cameraId } } : { facingMode: { ideal: "environment" } }),
+          facingMode: { exact: "environment" },     // exact — не даём Safari подсунуть фронталку
           width:  { ideal: 1920 },        // высокое разрешение — ключ к чтению мелких кодов
           height: { ideal: 1080 },
           advanced: [{ focusMode: "continuous" }]   // непрерывный автофокус (важно на iPhone)
@@ -972,9 +959,25 @@ async function startCamera(){
     camBtn.innerHTML = '<span>✕</span> Остановить';
     camHint.textContent = "Наведи камеру так, чтобы штрих-код занял ширину кадра. Держи 10–15 см, при плохом свете подсвети.";
   }catch(err){
-    reader.classList.remove("on");
-    scanner = null;
-    camHint.textContent = "Нет доступа к камере. Нужен https (GitHub Pages подходит) и разрешение на камеру в настройках Safari.";
+    // "exact: environment" мог не найти заднюю (десктоп/необычное устройство) —
+    // пробуем ещё раз мягко (любая доступная камера), прежде чем сдаться.
+    try{
+      await scanner.start(
+        { facingMode: "environment" },
+        { fps: 10, aspectRatio: 1.7777,
+          videoConstraints: { facingMode: "environment", width:{ideal:1920}, height:{ideal:1080}, advanced:[{focusMode:"continuous"}] } },
+        (text) => onScan(text),
+        () => {}
+      );
+      scanning = true;
+      camBtn.classList.add("active");
+      camBtn.innerHTML = '<span>✕</span> Остановить';
+      camHint.textContent = "Наведи камеру так, чтобы штрих-код занял ширину кадра.";
+    }catch(err2){
+      reader.classList.remove("on");
+      scanner = null;
+      camHint.textContent = "Нет доступа к камере. Нужен https (GitHub Pages подходит) и разрешение на камеру в настройках Safari.";
+    }
   }
 }
 
