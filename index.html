@@ -895,24 +895,39 @@ async function startCamera(){
       Html5QrcodeSupportedFormats.EAN_8,
       Html5QrcodeSupportedFormats.UPC_A,
       Html5QrcodeSupportedFormats.UPC_E
-    ]
+    ],
+    // нативный BarcodeDetector там, где он есть (Android/Chrome). На iOS Safari его нет —
+    // просто игнорируется, но на Android даёт мгновенное чтение бесплатно.
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+    verbose: false
   });
   reader.classList.add("on");
   try{
     await scanner.start(
-      { facingMode: "environment" },              // задняя камера
-      { fps: 10, qrbox: { width: 260, height: 120 } },
-      (text) => onScan(text),                      // успех
-      () => {}                                     // покадровые промахи — игнор
+      { facingMode: "environment" },   // игнорируется, т.к. ниже заданы videoConstraints
+      {
+        fps: 10,
+        // qrbox НЕ задаём → сканируем весь кадр: для широких EAN-13 это заметно надёжнее,
+        // чем узкая рамка, которая обрезает код.
+        aspectRatio: 1.7777,
+        videoConstraints: {
+          facingMode: { ideal: "environment" },
+          width:  { ideal: 1920 },        // высокое разрешение — ключ к чтению мелких кодов
+          height: { ideal: 1080 },
+          advanced: [{ focusMode: "continuous" }]   // непрерывный автофокус (важно на iPhone)
+        }
+      },
+      (text) => onScan(text),            // успех
+      () => {}                           // покадровые промахи — игнор
     );
     scanning = true;
     camBtn.classList.add("active");
     camBtn.innerHTML = '<span>✕</span> Остановить';
-    camHint.textContent = "Наведи заднюю камеру на штрих-код товара.";
+    camHint.textContent = "Наведи камеру так, чтобы штрих-код занял ширину кадра. Держи 10–15 см, при плохом свете подсвети.";
   }catch(err){
     reader.classList.remove("on");
     scanner = null;
-    camHint.textContent = "Нет доступа к камере. В превью артефакта камера часто заблокирована — скачай файл и открой локально (нужен https или localhost) на телефоне.";
+    camHint.textContent = "Нет доступа к камере. Нужен https (GitHub Pages подходит) и разрешение на камеру в настройках Safari.";
   }
 }
 
