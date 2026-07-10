@@ -179,7 +179,7 @@
 <div class="wrap">
   <header>
     <h1>Сканер продуктов · прототип</h1>
-    <p>Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v8-scan</b></p>
+    <p>Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v9-diag</b></p>
   </header>
 
   <div class="scan-box">
@@ -941,9 +941,6 @@ async function startCamera(){
   gotResult = false;
   const onOk = (text) => { if (!gotResult){ gotResult = true; onScan(text); } };
   try{
-    // Базовая рабочая конфигурация: задняя камера + штатная рамка qrbox.
-    // Ровно то, что раньше стабильно ловило лёгкие коды. Без exact/разрешения/aspectRatio,
-    // которые ломали запуск на iOS.
     await scanner.start(
       { facingMode: "environment" },
       { fps: 10, qrbox: { width: 260, height: 120 } },
@@ -951,46 +948,50 @@ async function startCamera(){
     );
   }catch(e){
     reader.classList.remove("on"); scanner = null;
-    camHint.textContent = "Нет доступа к камере. Нужен https (GitHub Pages подходит) и разрешение на камеру в Safari.";
+    // ДИАГНОСТИКА: показываем реальную причину, а не общий текст
+    camHint.textContent = "⚠ Сканер не стартовал: " + (e && (e.name + " — " + e.message) || e);
     return;
   }
   scanning = true;
   camBtn.classList.add("active"); camBtn.innerHTML = '<span>✕</span> Остановить';
   camShot.style.display = "block";
-  camHint.textContent = "Наведи штрих-код в рамку — поймает сам. Не ловит за пару секунд? Нажми «Снять».";
+  const v = reader.querySelector("video");
+  camHint.textContent = "Наведи код в рамку. Не ловит? Нажми «Снять». [видео: " + (v ? "есть" : "НЕТ") + "]";
 }
 
 // СТРАХОВКА: снимок текущего кадра → декодируем ZXing по неподвижной чёткой картинке
 async function captureAndDecode(){
   const video = reader.querySelector("video");
-  if (!scanning || !video || !video.videoWidth){
-    camHint.textContent = "Камера ещё грузится — подожди секунду и нажми «Снять».";
-    return;
-  }
+  if (!scanning){ camHint.textContent = "Сканер не запущен — нажми «Сканировать камерой»."; return; }
+  if (!video){ camHint.textContent = "⚠ Видео не найдено в окне сканера (старт камеры не удался)."; return; }
+  if (!video.videoWidth){ camHint.textContent = "⚠ Кадр пустой (video " + video.videoWidth + "×" + video.videoHeight + ") — подожди фокуса и нажми снова."; return; }
   camShot.disabled = true; camShot.textContent = "Распознаю…";
-  const canvas = document.createElement("canvas");
-  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-  canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
-  const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", 0.95));
-  const file = new File([blob], "scan.jpg", { type: "image/jpeg" });
-
-  if (!fileDecoder){
-    fileDecoder = new Html5Qrcode("fileDecoder", {
-      formatsToSupport: [
-        Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
-        Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E
-      ],
-      verbose: false
-    });
-  }
   try{
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", 0.95));
+    const file = new File([blob], "scan.jpg", { type: "image/jpeg" });
+    if (!fileDecoder){
+      fileDecoder = new Html5Qrcode("fileDecoder", {
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E
+        ],
+        verbose: false
+      });
+    }
     let text;
     if (typeof fileDecoder.scanFileV2 === "function"){ const r = await fileDecoder.scanFileV2(file, false); text = r.decodedText; }
-    else text = await fileDecoder.scanFile(file, false);   // старые сборки
-    if (!gotResult){ gotResult = true; onScan(text); }      // успех → обычный поток
+    else text = await fileDecoder.scanFile(file, false);
+    if (!gotResult){ gotResult = true; onScan(text); }
   }catch(err){
     camShot.disabled = false; camShot.textContent = "📸 Снять и распознать";
-    camHint.textContent = "Код не распознан. Наведи ровнее (код в рамку, дождись фокуса) и сними ещё раз — или впиши цифры под штрих-кодом в поле выше и нажми «Найти».";
+    // ДИАГНОСТИКА: "NotFoundException" = код просто не распознан; иное = техническая ошибка
+    const msg = (err && err.name === "NotFoundException")
+      ? "Код на снимке не распознан. Наведи ровнее (плоско, без блика, дождись фокуса) и сними ещё — или впиши цифры руками."
+      : "⚠ Ошибка снимка: " + (err && (err.name + " — " + err.message) || err);
+    camHint.textContent = msg;
     el("ean").focus();
   }
 }
