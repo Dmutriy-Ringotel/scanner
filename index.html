@@ -198,7 +198,7 @@
     <button class="cam-btn" id="camBtn"><span>📷</span> Сканировать камерой</button>
     <div id="reader"></div>
     <button id="camShot" class="cam-shot">📸 Снять и распознать</button>
-    <div id="fileDecoder" style="display:none"></div>
+    <div id="fileDecoder" style="position:absolute; left:-10000px; top:0; width:2px; height:2px; overflow:hidden"></div>
     <div class="cam-hint" id="camHint"></div>
   </div>
 
@@ -931,8 +931,13 @@ async function startCamera(){
     return;
   }
   reader.classList.add("on");
-  reader.innerHTML = `<video id="camVideo" playsinline muted></video><div class="cam-frame"><div class="box"></div></div>`;
+  reader.innerHTML = `<video id="camVideo" playsinline muted autoplay></video><div class="cam-frame"><div class="box"></div></div>`;
   camVideo = el("camVideo");
+  // критично для iOS: без этих свойств Safari не запускает видео → videoWidth=0 → снимок не работает
+  camVideo.muted = true;
+  camVideo.playsInline = true;
+  camVideo.setAttribute("playsinline", "");
+  camVideo.setAttribute("webkit-playsinline", "");
   try{
     // строго задняя камера; если exact недоступна (десктоп) — мягкий фолбэк
     try{
@@ -949,8 +954,13 @@ async function startCamera(){
     return;
   }
   camVideo.srcObject = camStream;
-  camVideo.setAttribute("playsinline", "");
-  await camVideo.play().catch(()=>{});
+  // ждём, пока видео реально получит размеры (иначе снимок будет пустой)
+  await new Promise(res => {
+    if (camVideo.videoWidth) return res();
+    camVideo.onloadedmetadata = () => res();
+    setTimeout(res, 1800);
+  });
+  try{ await camVideo.play(); }catch(e){}
   scanning = true;
   camBtn.classList.add("active"); camBtn.innerHTML = '<span>✕</span> Остановить';
   camShot.style.display = "block";
@@ -959,7 +969,11 @@ async function startCamera(){
 
 // снимок текущего кадра → декодируем ZXing по неподвижной картинке
 async function captureAndDecode(){
-  if (!scanning || !camVideo || !camVideo.videoWidth) return;
+  if (!scanning || !camVideo) return;
+  if (!camVideo.videoWidth){
+    camHint.textContent = "Камера ещё грузится — подожди секунду и нажми «Снять» снова.";
+    return;
+  }
   camShot.disabled = true; camShot.textContent = "Распознаю…";
   const canvas = document.createElement("canvas");
   canvas.width = camVideo.videoWidth; canvas.height = camVideo.videoHeight;
