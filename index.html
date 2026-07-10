@@ -935,40 +935,29 @@ async function startCamera(){
       Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
       Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E
     ],
-    experimentalFeatures: { useBarCodeDetectorIfSupported: true },  // Android: нативно и мгновенно
     verbose: false
   });
   reader.classList.add("on");
   gotResult = false;
-  const config = {
-    fps: 10,
-    aspectRatio: 1.7777,
-    videoConstraints: {
-      facingMode: { ideal: "environment" },
-      width:  { ideal: 1920 }, height: { ideal: 1080 },
-      advanced: [{ focusMode: "continuous" }]
-    }
-  };
-  const onOk = (text) => { if (!gotResult){ gotResult = true; onScan(text); } };  // живой скан поймал
+  const onOk = (text) => { if (!gotResult){ gotResult = true; onScan(text); } };
   try{
-    await scanner.start({ facingMode: { exact: "environment" } }, config, onOk, ()=>{});
+    // Базовая рабочая конфигурация: задняя камера + штатная рамка qrbox.
+    // Ровно то, что раньше стабильно ловило лёгкие коды. Без exact/разрешения/aspectRatio,
+    // которые ломали запуск на iOS.
+    await scanner.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: { width: 260, height: 120 } },
+      onOk, ()=>{}
+    );
   }catch(e){
-    try{ await scanner.start({ facingMode: "environment" }, config, onOk, ()=>{}); }
-    catch(e2){
-      reader.classList.remove("on"); scanner = null;
-      camHint.textContent = "Нет доступа к камере. Нужен https (GitHub Pages подходит) и разрешение на камеру в Safari.";
-      return;
-    }
-  }
-  // рамка-гид поверх видео, которое создал html5-qrcode
-  if (!reader.querySelector(".cam-frame")){
-    const f = document.createElement("div"); f.className = "cam-frame"; f.innerHTML = '<div class="box"></div>';
-    reader.appendChild(f);
+    reader.classList.remove("on"); scanner = null;
+    camHint.textContent = "Нет доступа к камере. Нужен https (GitHub Pages подходит) и разрешение на камеру в Safari.";
+    return;
   }
   scanning = true;
   camBtn.classList.add("active"); camBtn.innerHTML = '<span>✕</span> Остановить';
   camShot.style.display = "block";
-  camHint.textContent = "Наведи код в рамку — поймает сам. Если не ловит за пару секунд, нажми «Снять».";
+  camHint.textContent = "Наведи штрих-код в рамку — поймает сам. Не ловит за пару секунд? Нажми «Снять».";
 }
 
 // СТРАХОВКА: снимок текущего кадра → декодируем ZXing по неподвижной чёткой картинке
