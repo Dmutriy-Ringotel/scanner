@@ -141,9 +141,15 @@
   .concern-name{font-size:13px; font-weight:600}
   .concern-why{font-size:11.5px; color:var(--muted); margin-top:1px}
   .concern-src{color:var(--stub)}
-  #reader{margin-top:10px; border-radius:10px; overflow:hidden; display:none}
+  #reader{position:relative; margin-top:10px; border-radius:10px; overflow:hidden; display:none}
   #reader.on{display:block}
-  #reader video{border-radius:10px; display:block; width:100%}
+  #reader video{border-radius:10px; display:block; width:100%; max-height:60vh; object-fit:cover; background:#000}
+  /* рамка-гид: тёмная маска вокруг + светлый прямоугольник под EAN-13 */
+  .cam-frame{position:absolute; inset:0; pointer-events:none; display:flex; align-items:center; justify-content:center}
+  .cam-frame .box{width:84%; height:34%; border:2px solid #fff; border-radius:10px; box-shadow:0 0 0 3000px rgba(0,0,0,.30)}
+  .cam-shot{display:none; width:100%; margin-top:8px; font-family:inherit; font-size:15px; font-weight:600; color:#fff; background:var(--blue); border:none; border-radius:8px; padding:12px; cursor:pointer}
+  .cam-shot:active{opacity:.85}
+  .cam-shot:disabled{opacity:.6}
   .cam-hint{font-size:11px; color:var(--muted); text-align:center; margin-top:6px; line-height:1.5}
 
   /* запрос фото для нового товара */
@@ -191,6 +197,8 @@
     </div>
     <button class="cam-btn" id="camBtn"><span>📷</span> Сканировать камерой</button>
     <div id="reader"></div>
+    <button id="camShot" class="cam-shot">📸 Снять и распознать</button>
+    <div id="fileDecoder" style="display:none"></div>
     <div class="cam-hint" id="camHint"></div>
   </div>
 
@@ -910,81 +918,86 @@ document.querySelectorAll(".examples button").forEach(b=>{
 });
 
 /* ================================================================
-   СЧИТЫВАНИЕ ШТРИХ-КОДА КАМЕРОЙ (html5-qrcode)
+   КАМЕРА: превью + рамка → снимок → локальное декодирование ZXing.
+   Неподвижный чёткий кадр читается заметно лучше, чем дёрганое видео.
+   Не распознали → просим вписать код руками (без ИИ, бесплатно).
    ================================================================ */
-let scanner = null, scanning = false;
-const camBtn = el("camBtn"), reader = el("reader"), camHint = el("camHint");
+let camStream = null, camVideo = null, fileDecoder = null, scanning = false;
+const camBtn = el("camBtn"), reader = el("reader"), camHint = el("camHint"), camShot = el("camShot");
 
 async function startCamera(){
   if (typeof Html5Qrcode === "undefined"){
     camHint.textContent = "Сканер не загрузился — проверь соединение с интернетом.";
     return;
   }
-  scanner = new Html5Qrcode("reader", {
-    formatsToSupport: [
-      Html5QrcodeSupportedFormats.EAN_13,
-      Html5QrcodeSupportedFormats.EAN_8,
-      Html5QrcodeSupportedFormats.UPC_A,
-      Html5QrcodeSupportedFormats.UPC_E
-    ],
-    // нативный BarcodeDetector там, где он есть (Android/Chrome). На iOS Safari его нет —
-    // просто игнорируется, но на Android даёт мгновенное чтение бесплатно.
-    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-    verbose: false
-  });
   reader.classList.add("on");
+  reader.innerHTML = `<video id="camVideo" playsinline muted></video><div class="cam-frame"><div class="box"></div></div>`;
+  camVideo = el("camVideo");
   try{
-    // На iOS Safari метки камер часто пустые (приватность) → перечисление по названию
-    // промахивается (можно попасть на фронталку). Надёжнее прямо просить заднюю камеру
-    // через facingMode: environment и НЕ выбирать устройство вручную.
-    await scanner.start(
-      { facingMode: { exact: "environment" } },   // строго задняя камера
-      {
-        fps: 10,
-        // qrbox НЕ задаём → сканируем весь кадр: для широких EAN-13 это заметно надёжнее,
-        // чем узкая рамка, которая обрезает код.
-        aspectRatio: 1.7777,
-        videoConstraints: {
-          facingMode: { exact: "environment" },     // exact — не даём Safari подсунуть фронталку
-          width:  { ideal: 1920 },        // высокое разрешение — ключ к чтению мелких кодов
-          height: { ideal: 1080 },
-          advanced: [{ focusMode: "continuous" }]   // непрерывный автофокус (важно на iPhone)
-        }
-      },
-      (text) => onScan(text),            // успех
-      () => {}                           // покадровые промахи — игнор
-    );
-    scanning = true;
-    camBtn.classList.add("active");
-    camBtn.innerHTML = '<span>✕</span> Остановить';
-    camHint.textContent = "Наведи камеру так, чтобы штрих-код занял ширину кадра. Держи 10–15 см, при плохом свете подсвети.";
-  }catch(err){
-    // "exact: environment" мог не найти заднюю (десктоп/необычное устройство) —
-    // пробуем ещё раз мягко (любая доступная камера), прежде чем сдаться.
+    // строго задняя камера; если exact недоступна (десктоп) — мягкий фолбэк
     try{
-      await scanner.start(
-        { facingMode: "environment" },
-        { fps: 10, aspectRatio: 1.7777,
-          videoConstraints: { facingMode: "environment", width:{ideal:1920}, height:{ideal:1080}, advanced:[{focusMode:"continuous"}] } },
-        (text) => onScan(text),
-        () => {}
-      );
-      scanning = true;
-      camBtn.classList.add("active");
-      camBtn.innerHTML = '<span>✕</span> Остановить';
-      camHint.textContent = "Наведи камеру так, чтобы штрих-код занял ширину кадра.";
-    }catch(err2){
-      reader.classList.remove("on");
-      scanner = null;
-      camHint.textContent = "Нет доступа к камере. Нужен https (GitHub Pages подходит) и разрешение на камеру в настройках Safari.";
+      camStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { exact: "environment" }, width:{ideal:1920}, height:{ideal:1080}, advanced:[{focusMode:"continuous"}] },
+        audio: false
+      });
+    }catch(e){
+      camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
     }
+  }catch(e2){
+    reader.classList.remove("on"); reader.innerHTML = "";
+    camHint.textContent = "Нет доступа к камере. Нужен https (GitHub Pages подходит) и разрешение на камеру в Safari.";
+    return;
+  }
+  camVideo.srcObject = camStream;
+  camVideo.setAttribute("playsinline", "");
+  await camVideo.play().catch(()=>{});
+  scanning = true;
+  camBtn.classList.add("active"); camBtn.innerHTML = '<span>✕</span> Остановить';
+  camShot.style.display = "block";
+  camHint.textContent = "Наведи так, чтобы штрих-код был в рамке и в фокусе, затем нажми «Снять».";
+}
+
+// снимок текущего кадра → декодируем ZXing по неподвижной картинке
+async function captureAndDecode(){
+  if (!scanning || !camVideo || !camVideo.videoWidth) return;
+  camShot.disabled = true; camShot.textContent = "Распознаю…";
+  const canvas = document.createElement("canvas");
+  canvas.width = camVideo.videoWidth; canvas.height = camVideo.videoHeight;
+  canvas.getContext("2d").drawImage(camVideo, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", 0.95));
+  const file = new File([blob], "scan.jpg", { type: "image/jpeg" });
+
+  if (!fileDecoder){
+    fileDecoder = new Html5Qrcode("fileDecoder", {
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E
+      ],
+      verbose: false
+    });
+  }
+  try{
+    let decodedText;
+    if (typeof fileDecoder.scanFileV2 === "function"){
+      const res = await fileDecoder.scanFileV2(file, false);
+      decodedText = res.decodedText;
+    } else {
+      decodedText = await fileDecoder.scanFile(file, false);   // старые сборки
+    }
+    onScan(decodedText);                   // успех → обычный поток (OFF/OBF)
+  }catch(err){
+    camShot.disabled = false; camShot.textContent = "📸 Снять и распознать";
+    camHint.textContent = "Код не распознан. Наведи ровнее (код в рамку, дождись фокуса) и сними ещё раз — или впиши цифры под штрих-кодом в поле выше и нажми «Найти».";
+    el("ean").focus();
   }
 }
 
 async function stopCamera(){
-  if (scanner && scanning){ try{ await scanner.stop(); }catch(e){} }
-  scanning = false; scanner = null;
+  if (camStream){ camStream.getTracks().forEach(t=>{ try{ t.stop(); }catch(e){} }); camStream = null; }
+  if (fileDecoder){ try{ await fileDecoder.clear(); }catch(e){} fileDecoder = null; }
+  scanning = false; camVideo = null;
   reader.classList.remove("on"); reader.innerHTML = "";
+  camShot.style.display = "none"; camShot.disabled = false; camShot.textContent = "📸 Снять и распознать";
   camBtn.classList.remove("active");
   camBtn.innerHTML = '<span>📷</span> Сканировать камерой';
 }
@@ -998,6 +1011,7 @@ function onScan(text){
 }
 
 camBtn.addEventListener("click", ()=>{ scanning ? stopCamera() : startCamera(); });
+camShot.addEventListener("click", captureAndDecode);
 
 /* ---- запрос фото нового товара: оборот (обязат.) + лицевая (опц.) ---- */
 let pendingEan = null;
