@@ -918,11 +918,11 @@ document.querySelectorAll(".examples button").forEach(b=>{
 });
 
 /* ================================================================
-   КАМЕРА: превью + рамка → снимок → локальное декодирование ZXing.
-   Неподвижный чёткий кадр читается заметно лучше, чем дёрганое видео.
-   Не распознали → просим вписать код руками (без ИИ, бесплатно).
+   КАМЕРА (гибрид): живое авто-сканирование ловит лёгкие коды само;
+   если не поймал за пару секунд — кнопка «Снять» декодирует чёткий кадр.
+   Не вышло → просим вписать код руками (без ИИ, бесплатно).
    ================================================================ */
-let camStream = null, camVideo = null, fileDecoder = null, scanning = false;
+let scanner = null, fileDecoder = null, scanning = false, gotResult = false;
 const camBtn = el("camBtn"), reader = el("reader"), camHint = el("camHint"), camShot = el("camShot");
 
 async function startCamera(){
@@ -930,54 +930,58 @@ async function startCamera(){
     camHint.textContent = "Сканер не загрузился — проверь соединение с интернетом.";
     return;
   }
-  reader.classList.add("on");
-  reader.innerHTML = `<video id="camVideo" playsinline muted autoplay></video><div class="cam-frame"><div class="box"></div></div>`;
-  camVideo = el("camVideo");
-  // критично для iOS: без этих свойств Safari не запускает видео → videoWidth=0 → снимок не работает
-  camVideo.muted = true;
-  camVideo.playsInline = true;
-  camVideo.setAttribute("playsinline", "");
-  camVideo.setAttribute("webkit-playsinline", "");
-  try{
-    // строго задняя камера; если exact недоступна (десктоп) — мягкий фолбэк
-    try{
-      camStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { exact: "environment" }, width:{ideal:1920}, height:{ideal:1080}, advanced:[{focusMode:"continuous"}] },
-        audio: false
-      });
-    }catch(e){
-      camStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
-    }
-  }catch(e2){
-    reader.classList.remove("on"); reader.innerHTML = "";
-    camHint.textContent = "Нет доступа к камере. Нужен https (GitHub Pages подходит) и разрешение на камеру в Safari.";
-    return;
-  }
-  camVideo.srcObject = camStream;
-  // ждём, пока видео реально получит размеры (иначе снимок будет пустой)
-  await new Promise(res => {
-    if (camVideo.videoWidth) return res();
-    camVideo.onloadedmetadata = () => res();
-    setTimeout(res, 1800);
+  scanner = new Html5Qrcode("reader", {
+    formatsToSupport: [
+      Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
+      Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E
+    ],
+    experimentalFeatures: { useBarCodeDetectorIfSupported: true },  // Android: нативно и мгновенно
+    verbose: false
   });
-  try{ await camVideo.play(); }catch(e){}
+  reader.classList.add("on");
+  gotResult = false;
+  const config = {
+    fps: 10,
+    aspectRatio: 1.7777,
+    videoConstraints: {
+      facingMode: { ideal: "environment" },
+      width:  { ideal: 1920 }, height: { ideal: 1080 },
+      advanced: [{ focusMode: "continuous" }]
+    }
+  };
+  const onOk = (text) => { if (!gotResult){ gotResult = true; onScan(text); } };  // живой скан поймал
+  try{
+    await scanner.start({ facingMode: { exact: "environment" } }, config, onOk, ()=>{});
+  }catch(e){
+    try{ await scanner.start({ facingMode: "environment" }, config, onOk, ()=>{}); }
+    catch(e2){
+      reader.classList.remove("on"); scanner = null;
+      camHint.textContent = "Нет доступа к камере. Нужен https (GitHub Pages подходит) и разрешение на камеру в Safari.";
+      return;
+    }
+  }
+  // рамка-гид поверх видео, которое создал html5-qrcode
+  if (!reader.querySelector(".cam-frame")){
+    const f = document.createElement("div"); f.className = "cam-frame"; f.innerHTML = '<div class="box"></div>';
+    reader.appendChild(f);
+  }
   scanning = true;
   camBtn.classList.add("active"); camBtn.innerHTML = '<span>✕</span> Остановить';
   camShot.style.display = "block";
-  camHint.textContent = "Наведи так, чтобы штрих-код был в рамке и в фокусе, затем нажми «Снять».";
+  camHint.textContent = "Наведи код в рамку — поймает сам. Если не ловит за пару секунд, нажми «Снять».";
 }
 
-// снимок текущего кадра → декодируем ZXing по неподвижной картинке
+// СТРАХОВКА: снимок текущего кадра → декодируем ZXing по неподвижной чёткой картинке
 async function captureAndDecode(){
-  if (!scanning || !camVideo) return;
-  if (!camVideo.videoWidth){
-    camHint.textContent = "Камера ещё грузится — подожди секунду и нажми «Снять» снова.";
+  const video = reader.querySelector("video");
+  if (!scanning || !video || !video.videoWidth){
+    camHint.textContent = "Камера ещё грузится — подожди секунду и нажми «Снять».";
     return;
   }
   camShot.disabled = true; camShot.textContent = "Распознаю…";
   const canvas = document.createElement("canvas");
-  canvas.width = camVideo.videoWidth; canvas.height = camVideo.videoHeight;
-  canvas.getContext("2d").drawImage(camVideo, 0, 0, canvas.width, canvas.height);
+  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
   const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", 0.95));
   const file = new File([blob], "scan.jpg", { type: "image/jpeg" });
 
@@ -991,14 +995,10 @@ async function captureAndDecode(){
     });
   }
   try{
-    let decodedText;
-    if (typeof fileDecoder.scanFileV2 === "function"){
-      const res = await fileDecoder.scanFileV2(file, false);
-      decodedText = res.decodedText;
-    } else {
-      decodedText = await fileDecoder.scanFile(file, false);   // старые сборки
-    }
-    onScan(decodedText);                   // успех → обычный поток (OFF/OBF)
+    let text;
+    if (typeof fileDecoder.scanFileV2 === "function"){ const r = await fileDecoder.scanFileV2(file, false); text = r.decodedText; }
+    else text = await fileDecoder.scanFile(file, false);   // старые сборки
+    if (!gotResult){ gotResult = true; onScan(text); }      // успех → обычный поток
   }catch(err){
     camShot.disabled = false; camShot.textContent = "📸 Снять и распознать";
     camHint.textContent = "Код не распознан. Наведи ровнее (код в рамку, дождись фокуса) и сними ещё раз — или впиши цифры под штрих-кодом в поле выше и нажми «Найти».";
@@ -1007,9 +1007,14 @@ async function captureAndDecode(){
 }
 
 async function stopCamera(){
-  if (camStream){ camStream.getTracks().forEach(t=>{ try{ t.stop(); }catch(e){} }); camStream = null; }
+  gotResult = true;   // блокируем поздние коллбэки живого скана
+  if (scanner){
+    try{ if (scanner.isScanning) await scanner.stop(); }catch(e){}
+    try{ await scanner.clear(); }catch(e){}
+    scanner = null;
+  }
   if (fileDecoder){ try{ await fileDecoder.clear(); }catch(e){} fileDecoder = null; }
-  scanning = false; camVideo = null;
+  scanning = false;
   reader.classList.remove("on"); reader.innerHTML = "";
   camShot.style.display = "none"; camShot.disabled = false; camShot.textContent = "📸 Снять и распознать";
   camBtn.classList.remove("active");
