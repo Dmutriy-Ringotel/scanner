@@ -179,7 +179,7 @@
 <div class="wrap">
   <header>
     <h1>Сканер продуктов · прототип</h1>
-    <p>Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v9-diag</b></p>
+    <p>Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v10-stable</b></p>
   </header>
 
   <div class="scan-box">
@@ -918,12 +918,12 @@ document.querySelectorAll(".examples button").forEach(b=>{
 });
 
 /* ================================================================
-   КАМЕРА (гибрид): живое авто-сканирование ловит лёгкие коды само;
-   если не поймал за пару секунд — кнопка «Снять» декодирует чёткий кадр.
-   Не вышло → просим вписать код руками (без ИИ, бесплатно).
+   КАМЕРА: чистое живое сканирование (как в первых рабочих версиях).
+   Защита от ложных чтений: код принимается только если распознан
+   одинаково ДВА кадра подряд (одиночный кадр ZXing может врать).
    ================================================================ */
-let scanner = null, fileDecoder = null, scanning = false, gotResult = false;
-const camBtn = el("camBtn"), reader = el("reader"), camHint = el("camHint"), camShot = el("camShot");
+let scanner = null, scanning = false, gotResult = false, lastCode = null;
+const camBtn = el("camBtn"), reader = el("reader"), camHint = el("camHint");
 
 async function startCamera(){
   if (typeof Html5Qrcode === "undefined"){
@@ -938,8 +938,17 @@ async function startCamera(){
     verbose: false
   });
   reader.classList.add("on");
-  gotResult = false;
-  const onOk = (text) => { if (!gotResult){ gotResult = true; onScan(text); } };
+  gotResult = false; lastCode = null;
+  // подтверждение: принимаем код, только если он совпал в двух кадрах подряд
+  const onOk = (text) => {
+    const code = (text || "").replace(/\D/g, "");
+    if (!code) return;
+    if (code === lastCode){
+      if (!gotResult){ gotResult = true; onScan(code); }
+    } else {
+      lastCode = code;   // первый раз видим — ждём подтверждения следующим кадром
+    }
+  };
   try{
     await scanner.start(
       { facingMode: "environment" },
@@ -948,65 +957,23 @@ async function startCamera(){
     );
   }catch(e){
     reader.classList.remove("on"); scanner = null;
-    // ДИАГНОСТИКА: показываем реальную причину, а не общий текст
-    camHint.textContent = "⚠ Сканер не стартовал: " + (e && (e.name + " — " + e.message) || e);
+    camHint.textContent = "Нет доступа к камере. Нужен https (GitHub Pages подходит) и разрешение на камеру в Safari.";
     return;
   }
   scanning = true;
   camBtn.classList.add("active"); camBtn.innerHTML = '<span>✕</span> Остановить';
-  camShot.style.display = "block";
-  const v = reader.querySelector("video");
-  camHint.textContent = "Наведи код в рамку. Не ловит? Нажми «Снять». [видео: " + (v ? "есть" : "НЕТ") + "]";
-}
-
-// СТРАХОВКА: снимок текущего кадра → декодируем ZXing по неподвижной чёткой картинке
-async function captureAndDecode(){
-  const video = reader.querySelector("video");
-  if (!scanning){ camHint.textContent = "Сканер не запущен — нажми «Сканировать камерой»."; return; }
-  if (!video){ camHint.textContent = "⚠ Видео не найдено в окне сканера (старт камеры не удался)."; return; }
-  if (!video.videoWidth){ camHint.textContent = "⚠ Кадр пустой (video " + video.videoWidth + "×" + video.videoHeight + ") — подожди фокуса и нажми снова."; return; }
-  camShot.disabled = true; camShot.textContent = "Распознаю…";
-  try{
-    const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", 0.95));
-    const file = new File([blob], "scan.jpg", { type: "image/jpeg" });
-    if (!fileDecoder){
-      fileDecoder = new Html5Qrcode("fileDecoder", {
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
-          Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E
-        ],
-        verbose: false
-      });
-    }
-    let text;
-    if (typeof fileDecoder.scanFileV2 === "function"){ const r = await fileDecoder.scanFileV2(file, false); text = r.decodedText; }
-    else text = await fileDecoder.scanFile(file, false);
-    if (!gotResult){ gotResult = true; onScan(text); }
-  }catch(err){
-    camShot.disabled = false; camShot.textContent = "📸 Снять и распознать";
-    // ДИАГНОСТИКА: "NotFoundException" = код просто не распознан; иное = техническая ошибка
-    const msg = (err && err.name === "NotFoundException")
-      ? "Код на снимке не распознан. Наведи ровнее (плоско, без блика, дождись фокуса) и сними ещё — или впиши цифры руками."
-      : "⚠ Ошибка снимка: " + (err && (err.name + " — " + err.message) || err);
-    camHint.textContent = msg;
-    el("ean").focus();
-  }
+  camHint.textContent = "Наведи штрих-код в рамку — держи ровно и в фокусе.";
 }
 
 async function stopCamera(){
-  gotResult = true;   // блокируем поздние коллбэки живого скана
+  gotResult = true;   // блокируем поздние коллбэки
   if (scanner){
     try{ if (scanner.isScanning) await scanner.stop(); }catch(e){}
     try{ await scanner.clear(); }catch(e){}
     scanner = null;
   }
-  if (fileDecoder){ try{ await fileDecoder.clear(); }catch(e){} fileDecoder = null; }
   scanning = false;
   reader.classList.remove("on"); reader.innerHTML = "";
-  camShot.style.display = "none"; camShot.disabled = false; camShot.textContent = "📸 Снять и распознать";
   camBtn.classList.remove("active");
   camBtn.innerHTML = '<span>📷</span> Сканировать камерой';
 }
@@ -1020,7 +987,6 @@ function onScan(text){
 }
 
 camBtn.addEventListener("click", ()=>{ scanning ? stopCamera() : startCamera(); });
-camShot.addEventListener("click", captureAndDecode);
 
 /* ---- запрос фото нового товара: оборот (обязат.) + лицевая (опц.) ---- */
 let pendingEan = null;
