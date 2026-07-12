@@ -141,15 +141,9 @@
   .concern-name{font-size:13px; font-weight:600}
   .concern-why{font-size:11.5px; color:var(--muted); margin-top:1px}
   .concern-src{color:var(--stub)}
-  #reader{position:relative; margin-top:10px; border-radius:10px; overflow:hidden; display:none}
+  #reader{margin-top:10px; border-radius:10px; overflow:hidden; display:none}
   #reader.on{display:block}
-  #reader video{border-radius:10px; display:block; width:100%; max-height:60vh; object-fit:cover; background:#000}
-  /* рамка-гид: тёмная маска вокруг + светлый прямоугольник под EAN-13 */
-  .cam-frame{position:absolute; inset:0; pointer-events:none; display:flex; align-items:center; justify-content:center}
-  .cam-frame .box{width:84%; height:34%; border:2px solid #fff; border-radius:10px; box-shadow:0 0 0 3000px rgba(0,0,0,.30)}
-  .cam-shot{display:none; width:100%; margin-top:8px; font-family:inherit; font-size:15px; font-weight:600; color:#fff; background:var(--blue); border:none; border-radius:8px; padding:12px; cursor:pointer}
-  .cam-shot:active{opacity:.85}
-  .cam-shot:disabled{opacity:.6}
+  #reader video{border-radius:10px; display:block; width:100%}
   .cam-hint{font-size:11px; color:var(--muted); text-align:center; margin-top:6px; line-height:1.5}
 
   /* запрос фото для нового товара */
@@ -179,7 +173,7 @@
 <div class="wrap">
   <header>
     <h1>Сканер продуктов · прототип</h1>
-    <p>Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v10-stable</b></p>
+    <p>Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v13-ai</b></p>
   </header>
 
   <div class="scan-box">
@@ -197,8 +191,6 @@
     </div>
     <button class="cam-btn" id="camBtn"><span>📷</span> Сканировать камерой</button>
     <div id="reader"></div>
-    <button id="camShot" class="cam-shot">📸 Снять и распознать</button>
-    <div id="fileDecoder" style="position:absolute; left:-10000px; top:0; width:2px; height:2px; overflow:hidden"></div>
     <div class="cam-hint" id="camHint"></div>
   </div>
 
@@ -206,7 +198,7 @@
 
   <!-- запрос фото для нового товара (появляется, когда товара нет в OFF) -->
   <div class="photo-ask" id="photoAsk">
-    <p class="pa-title">Товара нет в базе. Сфотографируй упаковку — данные распознает ИИ.</p>
+    <p class="pa-title">Товара нет в базе. Сфотографируй <b>список ингредиентов</b> на упаковке — ИИ прочитает состав.</p>
 
     <div class="pa-shot" id="shotBack">
       <div class="pa-shot-info">
@@ -216,7 +208,7 @@
           <div class="pa-shot-hint">Состав и таблицу «Nährwerte» вместе. Снимай крупно, ближе, без бликов — от этого зависит оценка.</div>
         </div>
       </div>
-      <button class="pa-btn" id="btnBack">📷 Снять оборот</button>
+      <button class="pa-btn" id="btnBack">📷 Снять состав (ингредиенты)</button>
       <div class="pa-done" id="doneBack"></div>
     </div>
 
@@ -228,7 +220,7 @@
           <div class="pa-shot-hint">Продукт целиком — станет иконкой в карточке.</div>
         </div>
       </div>
-      <button class="pa-btn pa-btn-ghost" id="btnFront">📷 Снять лицевую</button>
+      <button class="pa-btn pa-btn-ghost" id="btnFront">📷 Снять упаковку спереди</button>
       <div class="pa-done" id="doneFront"></div>
     </div>
 
@@ -249,9 +241,9 @@
 const OFF_ENDPOINT = "https://world.openfoodfacts.org/api/v2/product/";
 // Open Beauty Facts — сестринская база косметики (тот же API). Роутер: OFF → OBF → фото.
 const OBF_ENDPOINT = "https://world.openbeautyfacts.org/api/v2/product/";
-// Адрес локального посредника для ИИ-распознавания (см. папку ai-proxy).
-// Пусто → распознавание выключено (прототип работает, но новые товары не распознаёт).
-const AI_PROXY_URL = "http://localhost:8787/recognize";
+// Адрес ИИ-посредника (Cloudflare Worker). Ключ модели хранится в секретах Cloudflare
+// и в браузер не попадает. Пусто/localhost → распознавание выключено.
+const AI_PROXY_URL = "https://ai-proxy.dmitryscan.workers.dev";
 const OFF_FIELDS = [
   "product_name","brands","quantity","image_front_small_url","image_ingredients_small_url",
   "nutriscore_grade","nova_group","ecoscore_grade","allergens_tags",
@@ -343,7 +335,12 @@ async function recognizeWithAI(ean, files){
       categories_tags: []
     };
   }catch(err){
-    return notRecognized(ean, "Распознавание недоступно (посредник не запущен?). Прототип работает без него.");
+    // Частая причина: AI_PROXY_URL указывает на http://localhost — с телефона это
+    // сам телефон, а не твой Mac. Нужен посредник в интернете по https.
+    const isLocal = /localhost|127\.0\.0\.1/.test(AI_PROXY_URL);
+    return notRecognized(ean, isLocal
+      ? "ИИ-распознавание не подключено: AI_PROXY_URL указывает на localhost — с телефона он недоступен. Нужен посредник в интернете по https (Cloudflare Worker / Vercel / Render), затем впиши его адрес в AI_PROXY_URL."
+      : "ИИ-посредник недоступен: " + (err && err.message || err));
   }
 }
 
@@ -918,11 +915,9 @@ document.querySelectorAll(".examples button").forEach(b=>{
 });
 
 /* ================================================================
-   КАМЕРА: чистое живое сканирование (как в первых рабочих версиях).
-   Защита от ложных чтений: код принимается только если распознан
-   одинаково ДВА кадра подряд (одиночный кадр ZXing может врать).
+   СЧИТЫВАНИЕ ШТРИХ-КОДА КАМЕРОЙ (html5-qrcode)
    ================================================================ */
-let scanner = null, scanning = false, gotResult = false, lastCode = null;
+let scanner = null, scanning = false;
 const camBtn = el("camBtn"), reader = el("reader"), camHint = el("camHint");
 
 async function startCamera(){
@@ -932,47 +927,34 @@ async function startCamera(){
   }
   scanner = new Html5Qrcode("reader", {
     formatsToSupport: [
-      Html5QrcodeSupportedFormats.EAN_13, Html5QrcodeSupportedFormats.EAN_8,
-      Html5QrcodeSupportedFormats.UPC_A, Html5QrcodeSupportedFormats.UPC_E
-    ],
-    verbose: false
+      Html5QrcodeSupportedFormats.EAN_13,
+      Html5QrcodeSupportedFormats.EAN_8,
+      Html5QrcodeSupportedFormats.UPC_A,
+      Html5QrcodeSupportedFormats.UPC_E
+    ]
   });
   reader.classList.add("on");
-  gotResult = false; lastCode = null;
-  // подтверждение: принимаем код, только если он совпал в двух кадрах подряд
-  const onOk = (text) => {
-    const code = (text || "").replace(/\D/g, "");
-    if (!code) return;
-    if (code === lastCode){
-      if (!gotResult){ gotResult = true; onScan(code); }
-    } else {
-      lastCode = code;   // первый раз видим — ждём подтверждения следующим кадром
-    }
-  };
   try{
     await scanner.start(
-      { facingMode: "environment" },
+      { facingMode: "environment" },              // задняя камера
       { fps: 10, qrbox: { width: 260, height: 120 } },
-      onOk, ()=>{}
+      (text) => onScan(text),                      // успех
+      () => {}                                     // покадровые промахи — игнор
     );
-  }catch(e){
-    reader.classList.remove("on"); scanner = null;
-    camHint.textContent = "Нет доступа к камере. Нужен https (GitHub Pages подходит) и разрешение на камеру в Safari.";
-    return;
+    scanning = true;
+    camBtn.classList.add("active");
+    camBtn.innerHTML = '<span>✕</span> Остановить';
+    camHint.textContent = "Наведи заднюю камеру на штрих-код товара.";
+  }catch(err){
+    reader.classList.remove("on");
+    scanner = null;
+    camHint.textContent = "Нет доступа к камере. Скачай файл и открой на телефоне по https (GitHub Pages подходит).";
   }
-  scanning = true;
-  camBtn.classList.add("active"); camBtn.innerHTML = '<span>✕</span> Остановить';
-  camHint.textContent = "Наведи штрих-код в рамку — держи ровно и в фокусе.";
 }
 
 async function stopCamera(){
-  gotResult = true;   // блокируем поздние коллбэки
-  if (scanner){
-    try{ if (scanner.isScanning) await scanner.stop(); }catch(e){}
-    try{ await scanner.clear(); }catch(e){}
-    scanner = null;
-  }
-  scanning = false;
+  if (scanner && scanning){ try{ await scanner.stop(); }catch(e){} }
+  scanning = false; scanner = null;
   reader.classList.remove("on"); reader.innerHTML = "";
   camBtn.classList.remove("active");
   camBtn.innerHTML = '<span>📷</span> Сканировать камерой';
@@ -1006,12 +988,12 @@ function openPhotoAsk(ean, baseProduct){
   photoMode    = baseProduct ? "improve" : "new";
   const title = photoAsk.querySelector(".pa-title");
   if (title) title.textContent = (photoMode === "improve")
-    ? "Данных о составе не хватает. Сфотографируй оборот — ИИ прочитает состав и аллергены, остальное из OFF сохранится."
-    : "Товара нет в базе. Сфотографируй упаковку — данные распознает ИИ.";
+    ? "Данных о составе не хватает. Сфотографируй список ингредиентов на упаковке — ИИ прочитает состав и аллергены, остальное из OFF сохранится."
+    : "Товара нет в базе. Сфотографируй список ингредиентов на упаковке — ИИ прочитает состав.";
   // сброс UI
   backFile = null; frontFile = null;
   doneBack.classList.remove("on"); doneFront.classList.remove("on");
-  btnBack.textContent = "📷 Снять оборот"; btnFront.textContent = "📷 Снять лицевую";
+  btnBack.textContent = "📷 Снять состав (ингредиенты)"; btnFront.textContent = "📷 Снять упаковку спереди";
   btnRecognize.disabled = true; btnRecognize.textContent = "Распознать";
   photoAsk.classList.add("on");
   photoAsk.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -1023,12 +1005,12 @@ btnFront.addEventListener("click", ()=> inpFront.click());
 
 inpBack.addEventListener("change", ()=>{
   backFile = inpBack.files[0] || null; inpBack.value = "";
-  if (backFile){ doneBack.textContent = "✓ оборот снят — можно переснять"; doneBack.classList.add("on"); btnBack.textContent = "📷 Переснять оборот"; }
-  btnRecognize.disabled = !backFile;    // распознавать можно, как только есть оборот
+  if (backFile){ doneBack.textContent = "✓ состав снят — можно переснять"; doneBack.classList.add("on"); btnBack.textContent = "📷 Переснять состав"; }
+  btnRecognize.disabled = !backFile;    // распознавать можно, как только есть фото состава
 });
 inpFront.addEventListener("change", ()=>{
   frontFile = inpFront.files[0] || null; inpFront.value = "";
-  if (frontFile){ doneFront.textContent = "✓ лицевая снята"; doneFront.classList.add("on"); btnFront.textContent = "📷 Переснять лицевую"; }
+  if (frontFile){ doneFront.textContent = "✓ упаковка снята"; doneFront.classList.add("on"); btnFront.textContent = "📷 Переснять упаковку"; }
 });
 
 btnRecognize.addEventListener("click", async ()=>{
@@ -1059,7 +1041,7 @@ btnRecognize.addEventListener("click", async ()=>{
   pendingEan = null; improveBase = null; photoMode = "new";
   backFile = null; frontFile = null;
   btnRecognize.textContent = "Распознать"; btnRecognize.disabled = true;
-  btnBack.textContent = "📷 Снять оборот"; btnFront.textContent = "📷 Снять лицевую";
+  btnBack.textContent = "📷 Снять состав (ингредиенты)"; btnFront.textContent = "📷 Снять упаковку спереди";
   doneBack.classList.remove("on"); doneFront.classList.remove("on");
 });
 
