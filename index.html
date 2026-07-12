@@ -173,7 +173,7 @@
 <div class="wrap">
   <header>
     <h1>Сканер продуктов · прототип</h1>
-    <p>Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v14</b></p>
+    <p>Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v15</b></p>
   </header>
 
   <div class="scan-box">
@@ -306,7 +306,12 @@ async function recognizeWithAI(ean, files){
   trace(`<span class="stub">отправляю фото на распознавание…</span>`);
   try{
     const images = [];
-    for (const f of files){ if (f) images.push(await fileToBase64(f)); }
+    for (const f of files){
+      if (!f) continue;
+      const r = await fileToBase64(f);
+      // fileToBase64 возвращает объект {base64, mediaType} — воркер ждёт СТРОКУ base64
+      images.push(typeof r === "string" ? r : r.base64);
+    }
     if (!images.length) return notRecognized(ean, "Нет фото для распознавания.");
 
     const res = await fetch(AI_PROXY_URL, {
