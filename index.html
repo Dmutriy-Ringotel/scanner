@@ -179,7 +179,7 @@
 <div class="wrap">
   <header>
     <div class="head-row"><h1 id="h1t">Сканер продуктов · прототип</h1><button id="langBtn" class="lang-btn">RU</button></div>
-    <p id="subt">Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v17</b></p>
+    <p id="subt">Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v18</b></p>
   </header>
 
   <div class="scan-box">
@@ -400,7 +400,7 @@ const t = (k) => (I18N[LANG] && I18N[LANG][k]) || I18N.de[k] || k;
 function applyLang(){
   document.documentElement.lang = LANG;
   el("h1t").textContent = t("title");
-  el("subt").innerHTML = t("subtitle") + ' <b id="ver">build v17</b>';
+  el("subt").innerHTML = t("subtitle") + ' <b id="ver">build v18</b>';
   el("ean").placeholder = t("eanPlaceholder");
   el("go").textContent = t("find");
   el("btnNewAi").textContent = t("newProduct");
@@ -977,13 +977,37 @@ async function wireTranslate(sourceText){
    Список стартовый — дополняется по мере тестов на живых марках.
    ================================================================ */
 const INCI_CONCERNS = [
-  { re:/\bbutylparaben\b|\bpropylparaben\b|\bisobutylparaben\b|\bisopropylparaben\b/i, sev:"high", reason:"парабен — потенциальное гормональное действие", src:"EU SCCS" },
-  { re:/\bmethylisothiazolinone\b|\bmethylchloroisothiazolinone\b/i, sev:"high", reason:"MI/MCI — сильный контактный аллерген, ограничен в ЕС", src:"EU 1223/2009" },
-  { re:/\bdmdm hydantoin\b|\bimidazolidinyl urea\b|\bdiazolidinyl urea\b|\bquaternium-15\b/i, sev:"high", reason:"высвобождает формальдегид", src:"EU SCCS" },
-  { re:/\btriclosan\b/i, sev:"high", reason:"антибактериальное — ограничено, экология", src:"EU 1223/2009" },
-  { re:/\baluminum chlorohydrate\b|\baluminium chlorohydrate\b|\baluminum zirconium|\baluminium zirconium/i, sev:"med", reason:"соль алюминия (антиперспиранты) — предмет споров", src:"BfR/Öko-Test" },
-  { re:/\boctocrylene\b|\bhomosalate\b|\bethylhexyl methoxycinnamate\b/i, sev:"med", reason:"UV-фильтр — обсуждается гормональное действие", src:"EU SCCS" },
-  { re:/\bpolyethylene\b|\bnylon-12\b|\bacrylates crosspolymer\b/i, sev:"med", reason:"синтетический полимер / микропластик", src:"BUND" },
+  // --- HIGH: консерванты и вещества под жёсткой критикой/ограничением ---
+  { re:/\bbutylparaben\b|\bpropylparaben\b|\bisobutylparaben\b|\bisopropylparaben\b/i, sev:"high",
+    reason:{ de:"Paraben — Verdacht auf hormonelle Wirkung", ru:"парабен — потенциальное гормональное действие" }, src:"EU SCCS" },
+  { re:/\bmethylisothiazolinone\b|\bmethylchloroisothiazolinone\b/i, sev:"high",
+    reason:{ de:"MI/MCI — starkes Kontaktallergen, in der EU beschränkt", ru:"MI/MCI — сильный контактный аллерген, ограничен в ЕС" }, src:"EU 1223/2009" },
+  { re:/\bdmdm hydantoin\b|\bimidazolidinyl urea\b|\bdiazolidinyl urea\b|\bquaternium-15\b/i, sev:"high",
+    reason:{ de:"setzt Formaldehyd frei", ru:"высвобождает формальдегид" }, src:"EU SCCS" },
+  { re:/\btriclosan\b/i, sev:"high",
+    reason:{ de:"antibakteriell — beschränkt, umweltbedenklich", ru:"антибактериальное — ограничено, вредно для среды" }, src:"EU 1223/2009" },
+  { re:/\bbutylphenyl methylpropional\b|\blilial\b/i, sev:"high",
+    reason:{ de:"Lilial — in der EU seit 2022 verboten (fortpflanzungsgefährdend)", ru:"Lilial — запрещён в ЕС с 2022 (репротоксичность)" }, src:"EU 1223/2009" },
+  { re:/\bformaldehyde\b|\bmethylene glycol\b/i, sev:"high",
+    reason:{ de:"Formaldehyd — als krebserregend eingestuft", ru:"формальдегид — классифицирован как канцероген" }, src:"EU SCCS" },
+
+  // --- MED: спорные, но не запрещённые ---
+  { re:/\baluminum chlorohydrate\b|\baluminium chlorohydrate\b|\baluminum zirconium|\baluminium zirconium/i, sev:"med",
+    reason:{ de:"Aluminiumsalz (Antitranspirant) — umstritten", ru:"соль алюминия (антиперспирант) — предмет споров" }, src:"BfR / Öko-Test" },
+  { re:/\boctocrylene\b|\bhomosalate\b|\bethylhexyl methoxycinnamate\b|\bbenzophenone-3\b|\boxybenzone\b/i, sev:"med",
+    reason:{ de:"chemischer UV-Filter — hormonelle Wirkung wird diskutiert", ru:"химический UV-фильтр — обсуждается гормональное действие" }, src:"EU SCCS" },
+  { re:/\bpolyethylene\b|\bnylon-12\b|\bnylon-6\b|\bacrylates crosspolymer\b|\bpolyquaternium\b|\bcarbomer\b/i, sev:"med",
+    reason:{ de:"synthetisches Polymer / Mikroplastik", ru:"синтетический полимер / микропластик" }, src:"BUND" },
+  { re:/\bparaffinum liquidum\b|\bmineral oil\b|\bpetrolatum\b|\bcera microcristallina\b|\bozokerite\b/i, sev:"med",
+    reason:{ de:"Mineralöl (MOAH/MOSH-Verunreinigungen möglich)", ru:"минеральное масло (возможны примеси MOAH/MOSH)" }, src:"Öko-Test / BfR" },
+  { re:/\bphenoxyethanol\b/i, sev:"med",
+    reason:{ de:"Konservierungsmittel — für Babyprodukte beschränkt", ru:"консервант — ограничен для детских продуктов" }, src:"EU SCCS" },
+  { re:/\bsodium lauryl sulfate\b|\bsls\b/i, sev:"med",
+    reason:{ de:"scharfes Tensid — kann Haut reizen", ru:"жёсткий ПАВ — может раздражать кожу" }, src:"EU SCCS" },
+  { re:/\bethylhexyl salicylate\b|\bbenzophenone-4\b/i, sev:"med",
+    reason:{ de:"UV-Filter — Bewertung noch nicht abgeschlossen", ru:"UV-фильтр — оценка не завершена" }, src:"EU SCCS" },
+  { re:/\bbht\b|\bbutylated hydroxytoluene\b/i, sev:"med",
+    reason:{ de:"Antioxidans — hormonelle Wirkung wird diskutiert", ru:"антиоксидант — обсуждается гормональное действие" }, src:"EU SCCS" },
 ];
 
 function scoreCosmetic(product){
@@ -992,7 +1016,12 @@ function scoreCosmetic(product){
   const concerns = [];
   for (const c of INCI_CONCERNS){
     const m = text.match(c.re);
-    if (m) concerns.push({ name:m[0], sev:c.sev, reason:c.reason, src:c.src });
+    if (m) concerns.push({
+      name: m[0],
+      sev: c.sev,
+      reason: (typeof c.reason === "string") ? c.reason : (c.reason[LANG] || c.reason.de),
+      src: c.src
+    });
   }
   const hasHigh = concerns.some(c => c.sev === "high");
   const hasMed  = concerns.some(c => c.sev === "med");
