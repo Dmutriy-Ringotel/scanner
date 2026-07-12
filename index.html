@@ -179,7 +179,7 @@
 <div class="wrap">
   <header>
     <div class="head-row"><h1 id="h1t">Сканер продуктов · прототип</h1><button id="langBtn" class="lang-btn">RU</button></div>
-    <p id="subt">Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v16</b></p>
+    <p id="subt">Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v17</b></p>
   </header>
 
   <div class="scan-box">
@@ -329,6 +329,10 @@ const I18N = {
     attrFood: "Zutatendaten © Open Food Facts (ODbL). Preise und Labortests — Demo-Platzhalter.",
     attrCosm: "Zutaten © Open Beauty Facts (ODbL). Stoffbewertungen nach regulatorischen Quellen (EU SCCS, BUND, Öko-Test). Keine medizinische Empfehlung.",
     verdictRed: "Bedenkliche Stoffe enthalten", verdictYellow: "Weitgehend ok, mit Einschränkungen", verdictGreen: "Keine Auffälligkeiten",
+    nova1: "unverarbeitet", nova2: "Küchenzutat", nova3: "verarbeitet", nova4: "hochverarbeitet", novaUnsure: "unsicher",
+    palmOil: "Palmöl", palmOilMaybe: "evtl. Palmöl",
+    lvLow: "niedrig", lvMod: "mäßig", lvHigh: "hoch",
+    kcal: " kcal", gram: " g",
   },
   ru: {
     title: "Сканер продуктов · прототип",
@@ -381,6 +385,10 @@ const I18N = {
     attrFood: "Данные о составе © Open Food Facts (ODbL). Цены и оценки лабораторий — демо-заглушки.",
     attrCosm: "Состав © Open Beauty Facts (ODbL). Оценки веществ — по регуляторным источникам (EU SCCS, BUND, Öko-Test). Не медицинская рекомендация.",
     verdictRed: "Есть повод для внимания", verdictYellow: "В целом ок, есть нюансы", verdictGreen: "Без явных поводов",
+    nova1: "необр.", nova2: "ингред.", nova3: "обработан", nova4: "ультра-обр.", novaUnsure: "не уверенно",
+    palmOil: "пальмовое масло", palmOilMaybe: "возможно пальмовое масло",
+    lvLow: "мало", lvMod: "умеренно", lvHigh: "много",
+    kcal: " ккал", gram: " г",
   }
 };
 
@@ -392,7 +400,7 @@ const t = (k) => (I18N[LANG] && I18N[LANG][k]) || I18N.de[k] || k;
 function applyLang(){
   document.documentElement.lang = LANG;
   el("h1t").textContent = t("title");
-  el("subt").innerHTML = t("subtitle") + ' <b id="ver">build v16</b>';
+  el("subt").innerHTML = t("subtitle") + ' <b id="ver">build v17</b>';
   el("ean").placeholder = t("eanPlaceholder");
   el("go").textContent = t("find");
   el("btnNewAi").textContent = t("newProduct");
@@ -829,8 +837,8 @@ async function drawCard(product, ean){
   const ana = product.ingredients_analysis_tags||[];
   const flags = [];
   alg.forEach(a => flags.push(`<span class="flag bad">${t("allergen")}: ${a}</span>`));
-  if (ana.includes("en:palm-oil")) flags.push(`<span class="flag warn">пальмовое масло</span>`);
-  else if (ana.includes("en:may-contain-palm-oil")) flags.push(`<span class="flag warn">возможно пальмовое масло</span>`);
+  if (ana.includes("en:palm-oil")) flags.push(`<span class="flag warn">${t("palmOil")}</span>`);
+  else if (ana.includes("en:may-contain-palm-oil")) flags.push(`<span class="flag warn">${t("palmOilMaybe")}</span>`);
   if (ana.includes("en:vegan")) flags.push(`<span class="flag">${t("vegan")}</span>`);
   else if (ana.includes("en:non-vegan")) flags.push(`<span class="flag">${t("nonVegan")}</span>`);
 
@@ -841,17 +849,17 @@ async function drawCard(product, ean){
 
   const n = product.nutriments||{};
   const lv = product.nutrient_levels||{};
-  const dot = (k)=>({low:'<span class="dot g">● мало</span>',moderate:'<span class="dot w">● умеренно</span>',high:'<span class="dot b">● много</span>'}[lv[k]]||"");
+  const dot = (k)=>({low:`<span class="dot g">● ${t("lvLow")}</span>`,moderate:`<span class="dot w">● ${t("lvMod")}</span>`,high:`<span class="dot b">● ${t("lvHigh")}</span>`}[lv[k]]||"");
   const num = (v,u)=> (v===undefined||v===null)?"—":`${(+v).toLocaleString("ru-RU")}${u||""}`;
 
   let nutriRows = "";
   if (Object.keys(n).length){
     nutriRows = `
-      <tr><td>Калории</td><td>${num(n["energy-kcal_100g"]," ккал")}</td></tr>
-      <tr><td>Сахара ${dot("sugars")}</td><td>${num(n["sugars_100g"]," г")}</td></tr>
-      <tr><td>Жиры ${dot("fat")}</td><td>${num(n["fat_100g"]," г")}</td></tr>
-      <tr><td>Белки</td><td>${num(n["proteins_100g"]," г")}</td></tr>
-      <tr><td>Соль ${dot("salt")}</td><td>${num(n["salt_100g"]," г")}</td></tr>`;
+      <tr><td>${t("calories")}</td><td>${num(n["energy-kcal_100g"],t("kcal"))}</td></tr>
+      <tr><td>${t("sugars")} ${dot("sugars")}</td><td>${num(n["sugars_100g"],t("gram"))}</td></tr>
+      <tr><td>${t("fat")} ${dot("fat")}</td><td>${num(n["fat_100g"],t("gram"))}</td></tr>
+      <tr><td>${t("proteins")}</td><td>${num(n["proteins_100g"],t("gram"))}</td></tr>
+      <tr><td>${t("salt")} ${dot("salt")}</td><td>${num(n["salt_100g"],t("gram"))}</td></tr>`;
   }
 
   // блок цен
@@ -876,7 +884,7 @@ async function drawCard(product, ean){
 
   const novaUnsure = nova && !dq.novaReliable;   // NOVA из грязного состава — не уверены
   const novaColor = novaUnsure ? "#c9cbc4" : ({1:"var(--na)",2:"var(--nb)",3:"var(--nd)",4:"var(--ne)"}[nova] || "#c9cbc4");
-  const novaLabel = novaUnsure ? "не уверенно" : ({1:"необр.",2:"ингред.",3:"обработан",4:"ультра-обр."}[nova] || "");
+  const novaLabel = novaUnsure ? t("novaUnsure") : ({1:t("nova1"),2:t("nova2"),3:t("nova3"),4:t("nova4")}[nova] || "");
   const mark = (on) => on ? '<small>расчёт</small>' : '';
   const scoresBlock = (ns||nova||eco) ? `
     <div class="scores">
