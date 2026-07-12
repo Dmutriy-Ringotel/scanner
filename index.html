@@ -173,7 +173,7 @@
 <div class="wrap">
   <header>
     <h1>Сканер продуктов · прототип</h1>
-    <p>Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v13-ai</b></p>
+    <p>Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v14</b></p>
   </header>
 
   <div class="scan-box">
@@ -316,7 +316,9 @@ async function recognizeWithAI(ean, files){
     });
     if (!res.ok){
       const e = await res.json().catch(()=>({}));
-      return notRecognized(ean, "Посредник вернул ошибку: " + (e.error || res.status));
+      // показываем ПОЛНУЮ причину от API (в detail), иначе не понять, что не так
+      const why = [e.error, e.detail].filter(Boolean).join(" · ");
+      return notRecognized(ean, "Посредник вернул ошибку: " + (why || res.status));
     }
     const p = await res.json();
     return {
