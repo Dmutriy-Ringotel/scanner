@@ -127,6 +127,12 @@
 
   /* камера */
   .cam-btn{width:100%; margin-top:8px; font-family:inherit; font-size:14px; font-weight:500; color:var(--blue); background:var(--blue-bg); border:1px solid #cfe0fb; border-radius:8px; padding:9px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:7px}
+  .head-row{display:flex; align-items:flex-start; justify-content:space-between; gap:10px}
+  .lang-btn{flex:0 0 auto; font-family:inherit; font-size:13px; font-weight:600; color:var(--muted); background:#fff; border:1px solid var(--line-strong); border-radius:8px; padding:6px 12px; cursor:pointer}
+  .lang-btn:hover{color:var(--ink); border-color:var(--ink)}
+  .translation{margin-top:10px; padding-top:10px; border-top:1px dashed var(--line-strong)}
+  .translation-lbl{font-size:11px; color:var(--muted); margin-bottom:4px}
+  .translate-btn{font-family:inherit; font-size:12px; color:var(--blue); background:none; border:none; padding:0; cursor:pointer; text-decoration:underline}
   .cam-btn:hover{background:#dde9fd}
   .cam-btn.active{color:var(--bad); background:#fbeae7; border-color:#f2c9c1}
   /* кнопка "уточнить фото → ИИ" для товаров с битым составом */
@@ -172,8 +178,8 @@
 <body>
 <div class="wrap">
   <header>
-    <h1>Сканер продуктов · прототип</h1>
-    <p>Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v15</b></p>
+    <div class="head-row"><h1 id="h1t">Сканер продуктов · прототип</h1><button id="langBtn" class="lang-btn">RU</button></div>
+    <p id="subt">Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v16</b></p>
   </header>
 
   <div class="scan-box">
@@ -187,7 +193,7 @@
       <button data-ean="5449000000996">Coca-Cola</button>
       <button data-ean="42277255">Nivea Creme 🧴</button>
       <button data-ean="4058172675379">Balea Handcreme 🧴</button>
-      <button data-ean="1111111111111">Новый товар → ИИ</button>
+      <button data-ean="1111111111111" id="btnNewAi">Новый товар → ИИ</button>
     </div>
     <button class="cam-btn" id="camBtn"><span>📷</span> Сканировать камерой</button>
     <div id="reader"></div>
@@ -265,6 +271,143 @@ const el = (id) => document.getElementById(id);
 const trace = (html) => { el("trace").innerHTML = html; };
 
 /* ================================================================
+   I18N — немецкий / русский. Язык определяется по языку телефона,
+   переключается кнопкой, выбор запоминается.
+   ВАЖНО: состав продукта НЕ переводим в основном поле — он показывается
+   ДОСЛОВНО с упаковки (юридически это факт с этикетки). Перевод — отдельной
+   справочной строкой с пометкой.
+   ================================================================ */
+const I18N = {
+  de: {
+    title: "Produkt-Scanner · Prototyp",
+    subtitle: "Phase 1 — Deutschland. Lebensmittel (OFF) + Kosmetik (OBF). Preise und Labortests — Platzhalter.",
+    eanPlaceholder: "Barcode (EAN-13)",
+    find: "Suchen",
+    newProduct: "Neues Produkt → KI",
+    scanCam: "Barcode scannen",
+    stopCam: "Stoppen",
+    health: "Gesundheit",
+    nutrition: "Nährwerte · 100 g",
+    ingredients: "Zutaten",
+    ingredientsInci: "Zutaten (INCI)",
+    scoreAssessment: "Bewertung der Zutaten",
+    prices: "Preise · Deutschland",
+    labTest: "Labortest",
+    stub: "Platzhalter",
+    priceSoon: "Preis wird noch ermittelt",
+    labSoon: "Für diese Kategorie liegt noch kein Labortest vor",
+    calories: "Kalorien", sugars: "Zucker", fat: "Fett", proteins: "Eiweiß", salt: "Salz",
+    allergen: "Allergen", vegan: "vegan", nonVegan: "nicht vegan",
+    dirtyIngredients: "⚠ Zutaten schlecht erkannt",
+    missingIngredients: "⚠ Zutaten nicht in OFF erfasst",
+    allergensUnsure: "Allergene: nicht überprüfbar",
+    inciDirty: "⚠ INCI schlecht erkannt",
+    improveBtn: "📷 Foto nachreichen → KI",
+    computedNote: "Werte mit „berechnet“ stammen aus Zutaten und Nährwerten, nicht aus der Datenbank — Abweichungen möglich.",
+    noConcerns: "Keine bedenklichen Stoffe aus unserer Liste gefunden",
+    fragrance: "Duftstoff",
+    notFound: "Produkt nicht in der Datenbank",
+    photoAskNew: "Produkt nicht in der Datenbank. Fotografiere die Zutatenliste — die KI liest sie aus.",
+    photoAskImprove: "Zutatendaten unvollständig. Fotografiere die Zutatenliste — die KI liest Zutaten und Allergene aus, der Rest bleibt aus OFF.",
+    shotIngredients: "📷 Zutaten fotografieren", shotFront: "📷 Vorderseite fotografieren",
+    reshotIngredients: "📷 Zutaten neu fotografieren", reshotFront: "📷 Vorderseite neu",
+    doneIngredients: "✓ Zutaten fotografiert", doneFront: "✓ Vorderseite fotografiert",
+    recognize: "Erkennen", recognizing: "Erkenne…",
+    camHint: "Richte die Rückkamera auf den Barcode.",
+    camNoAccess: "Kein Kamerazugriff. Bitte über https öffnen und Kamera erlauben.",
+    camNotLoaded: "Scanner nicht geladen — Internetverbindung prüfen.",
+    scanned: "Gescannt: ",
+    searching: "Suche in Open Food Facts…",
+    foundCache: "✓ im Cache gefunden",
+    foundOFF: "✓ Open Food Facts",
+    foundOBF: "✓ Open Beauty Facts",
+    needPhoto: "nicht in OFF/OBF → Foto der Verpackung nötig",
+    sendingPhoto: "sende Foto zur Erkennung…",
+    translation: "Übersetzung (unverbindlich)",
+    translateBtn: "Zutaten übersetzen",
+    translating: "übersetze…",
+    attrFood: "Zutatendaten © Open Food Facts (ODbL). Preise und Labortests — Demo-Platzhalter.",
+    attrCosm: "Zutaten © Open Beauty Facts (ODbL). Stoffbewertungen nach regulatorischen Quellen (EU SCCS, BUND, Öko-Test). Keine medizinische Empfehlung.",
+    verdictRed: "Bedenkliche Stoffe enthalten", verdictYellow: "Weitgehend ok, mit Einschränkungen", verdictGreen: "Keine Auffälligkeiten",
+  },
+  ru: {
+    title: "Сканер продуктов · прототип",
+    subtitle: "Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки.",
+    eanPlaceholder: "Штрих-код (EAN-13)",
+    find: "Найти",
+    newProduct: "Новый товар → ИИ",
+    scanCam: "Сканировать камерой",
+    stopCam: "Остановить",
+    health: "Здоровье",
+    nutrition: "Пищевая ценность · 100 г",
+    ingredients: "Состав",
+    ingredientsInci: "Состав (INCI)",
+    scoreAssessment: "Оценка состава",
+    prices: "Цены · Германия",
+    labTest: "Оценка лаборатории",
+    stub: "заглушка",
+    priceSoon: "Цену пока собираем",
+    labSoon: "Тест лаборатории по этой категории пока не занесён",
+    calories: "Калории", sugars: "Сахара", fat: "Жиры", proteins: "Белки", salt: "Соль",
+    allergen: "аллерген", vegan: "веганский", nonVegan: "не веганский",
+    dirtyIngredients: "⚠ состав распознан плохо",
+    missingIngredients: "⚠ состав не занесён в OFF",
+    allergensUnsure: "аллергены: не удалось проверить",
+    inciDirty: "⚠ INCI распознан плохо",
+    improveBtn: "📷 Уточнить фото → ИИ",
+    computedNote: "Оценки с пометкой «расчёт» вычислены из состава и БЖУ, а не взяты из базы — возможны неточности.",
+    noConcerns: "Проблемных веществ из нашего списка не найдено",
+    fragrance: "отдушка",
+    notFound: "Товар не в базе",
+    photoAskNew: "Товара нет в базе. Сфотографируй список ингредиентов на упаковке — ИИ прочитает состав.",
+    photoAskImprove: "Данных о составе не хватает. Сфотографируй список ингредиентов — ИИ прочитает состав и аллергены, остальное из OFF сохранится.",
+    shotIngredients: "📷 Снять состав (ингредиенты)", shotFront: "📷 Снять упаковку спереди",
+    reshotIngredients: "📷 Переснять состав", reshotFront: "📷 Переснять упаковку",
+    doneIngredients: "✓ состав снят", doneFront: "✓ упаковка снята",
+    recognize: "Распознать", recognizing: "Распознаю…",
+    camHint: "Наведи заднюю камеру на штрих-код товара.",
+    camNoAccess: "Нет доступа к камере. Открой по https и разреши камеру.",
+    camNotLoaded: "Сканер не загрузился — проверь соединение с интернетом.",
+    scanned: "Считано: ",
+    searching: "запрос в Open Food Facts…",
+    foundCache: "✓ найдено в кэше",
+    foundOFF: "✓ Open Food Facts",
+    foundOBF: "✓ Open Beauty Facts",
+    needPhoto: "нет в OFF/OBF → нужно фото упаковки",
+    sendingPhoto: "отправляю фото на распознавание…",
+    translation: "Перевод (справочно)",
+    translateBtn: "Перевести состав",
+    translating: "перевожу…",
+    attrFood: "Данные о составе © Open Food Facts (ODbL). Цены и оценки лабораторий — демо-заглушки.",
+    attrCosm: "Состав © Open Beauty Facts (ODbL). Оценки веществ — по регуляторным источникам (EU SCCS, BUND, Öko-Test). Не медицинская рекомендация.",
+    verdictRed: "Есть повод для внимания", verdictYellow: "В целом ок, есть нюансы", verdictGreen: "Без явных поводов",
+  }
+};
+
+// язык: сохранённый выбор → язык телефона → немецкий (целевой рынок)
+let LANG = localStorage.getItem("lang")
+  || ((navigator.language || "de").toLowerCase().startsWith("ru") ? "ru" : "de");
+const t = (k) => (I18N[LANG] && I18N[LANG][k]) || I18N.de[k] || k;
+
+function applyLang(){
+  document.documentElement.lang = LANG;
+  el("h1t").textContent = t("title");
+  el("subt").innerHTML = t("subtitle") + ' <b id="ver">build v16</b>';
+  el("ean").placeholder = t("eanPlaceholder");
+  el("go").textContent = t("find");
+  el("btnNewAi").textContent = t("newProduct");
+  if (!scanning) camBtn.innerHTML = '<span>📷</span> ' + t("scanCam");
+  el("langBtn").textContent = LANG === "de" ? "RU" : "DE";
+  // перерисовать открытую карточку на новом языке
+  if (lastProduct) showProduct(lastProduct, lastEan);
+}
+function toggleLang(){
+  LANG = (LANG === "de") ? "ru" : "de";
+  localStorage.setItem("lang", LANG);
+  applyLang();
+}
+
+/* ================================================================
    СЛОЙ 1 — ЯДРО / ЗДОРОВЬЕ  (бесплатно, реально)
    ================================================================ */
 
@@ -303,7 +446,7 @@ async function fetchFromOBF(ean){
 // $ ПЛАТНО. Принимает список выбранных фото (оборот обязателен, лицевая опц.)
 // и шлёт их посреднику (ai-proxy), который хранит ключ и зовёт модель.
 async function recognizeWithAI(ean, files){
-  trace(`<span class="stub">отправляю фото на распознавание…</span>`);
+  trace(`<span class="stub">${t("sendingPhoto")}</span>`);
   try{
     const images = [];
     for (const f of files){
@@ -355,7 +498,7 @@ async function recognizeWithAI(ean, files){
 function notRecognized(ean, msg){
   return {
     _failed: true, _msg: msg, code: ean,
-    product_name: "Товар не в базе", brands: "—", quantity: "",
+    product_name: t("notFound"), brands: "—", quantity: "",
     nutriscore_grade: null, nova_group: null, ecoscore_grade: null,
     allergens_tags: [], ingredients_analysis_tags: [],
     ingredients_text_with_allergens: msg,
@@ -438,11 +581,11 @@ function looksLikeCosmetic(p){
 async function lookupProduct(ean){
   // 1) свой кэш
   if (cache.has(ean)){
-    trace(`<span class="hit">✓ найдено в кэше</span> · $0`);
+    trace(`<span class="hit">${t("foundCache")}</span> · $0`);
     return cache.get(ean);
   }
   // 2) Open Food Facts (еда)
-  trace(`запрос в Open Food Facts…`);
+  trace(t("searching"));
   let product = await fetchFromOFF(ean);
   if (product){
     // OFF иногда содержит косметику (лаки, шампуни) — переклассифицируем
@@ -454,7 +597,7 @@ async function lookupProduct(ean){
       cache.set(ean, cos);
       return cos;
     }
-    trace(`<span class="hit">✓ Open Food Facts</span> · $0 · сохранено в кэш`);
+    trace(`<span class="hit">${t("foundOFF")}</span> · $0`);
     cache.set(ean, product);
     return product;
   }
@@ -462,12 +605,12 @@ async function lookupProduct(ean){
   trace(`нет в OFF → запрос в Open Beauty Facts…`);
   let cosmetic = await fetchFromOBF(ean);
   if (cosmetic){
-    trace(`<span class="hit">✓ Open Beauty Facts</span> · $0 · косметика · сохранено в кэш`);
+    trace(`<span class="hit">${t("foundOBF")}</span> · $0`);
     cache.set(ean, cosmetic);
     return cosmetic;
   }
   // 4) нет нигде → нужен снимок упаковки (распознавание запустит кнопка)
-  trace(`нет в OFF/OBF → <span class="stub">нужно фото упаковки</span>`);
+  trace(`<span class="stub">${t("needPhoto")}</span>`);
   return { _needPhoto: true, code: ean };
 }
 
@@ -495,7 +638,9 @@ async function render(ean){
 }
 
 // Диспетчер: косметику рисуем отдельной карточкой, еду — прежней.
+let lastProduct = null, lastEan = null;
 function showProduct(product, ean){
+  lastProduct = product; lastEan = ean;
   if (product && product._type === "cosmetic") drawCosmeticCard(product, ean);
   else drawCard(product, ean);
 }
@@ -683,16 +828,16 @@ async function drawCard(product, ean){
   if (alg.length === 0 && dq.categoryAllergen) alg = [dq.categoryAllergen.replace(/^en:/,"")];  // аллерген из категории
   const ana = product.ingredients_analysis_tags||[];
   const flags = [];
-  alg.forEach(a => flags.push(`<span class="flag bad">аллерген: ${a}</span>`));
+  alg.forEach(a => flags.push(`<span class="flag bad">${t("allergen")}: ${a}</span>`));
   if (ana.includes("en:palm-oil")) flags.push(`<span class="flag warn">пальмовое масло</span>`);
   else if (ana.includes("en:may-contain-palm-oil")) flags.push(`<span class="flag warn">возможно пальмовое масло</span>`);
-  if (ana.includes("en:vegan")) flags.push(`<span class="flag">веганский</span>`);
-  else if (ana.includes("en:non-vegan")) flags.push(`<span class="flag">не веганский</span>`);
+  if (ana.includes("en:vegan")) flags.push(`<span class="flag">${t("vegan")}</span>`);
+  else if (ana.includes("en:non-vegan")) flags.push(`<span class="flag">${t("nonVegan")}</span>`);
 
   // --- честные флаги от гейта качества (не показываем ложный зелёный) ---
-  if (dq.ingredientsDirty)                      flags.unshift(`<span class="flag warn">⚠ состав распознан плохо</span>`);
-  else if (dq.ingredientsMissing && dq.needsAI) flags.unshift(`<span class="flag warn">⚠ состав не занесён в OFF</span>`);
-  if (!dq.allergensReliable)                    flags.push(`<span class="flag warn">аллергены: не удалось проверить</span>`);
+  if (dq.ingredientsDirty)                      flags.unshift(`<span class="flag warn">${t("dirtyIngredients")}</span>`);
+  else if (dq.ingredientsMissing && dq.needsAI) flags.unshift(`<span class="flag warn">${t("missingIngredients")}</span>`);
+  if (!dq.allergensReliable)                    flags.push(`<span class="flag warn">${t("allergensUnsure")}</span>`);
 
   const n = product.nutriments||{};
   const lv = product.nutrient_levels||{};
@@ -718,7 +863,7 @@ async function drawCard(product, ean){
       .map(p=>`<div class="price-row ${p.p===min?'best':''}"><span class="shop">${p.shop}</span><span class="amt">${p.p.toFixed(2).replace('.',',')} €</span></div>`)
       .join("") + `</div>`;
   } else {
-    priceBlock = `<div class="empty" style="padding:8px 0">Цену пока собираем</div>`;
+    priceBlock = `<div class="empty" style="padding:8px 0">${t("priceSoon")}</div>`;
   }
 
   // блок лаборатории
@@ -726,7 +871,7 @@ async function drawCard(product, ean){
   if (lab){
     labBlock = `<div class="lab"><span class="grade" style="background:${lab.color}">${lab.grade}</span><span class="src">${lab.src}</span></div>`;
   } else {
-    labBlock = `<div class="empty" style="padding:8px 0">Тест лаборатории по этой категории пока не занесён</div>`;
+    labBlock = `<div class="empty" style="padding:8px 0">${t("labSoon")}</div>`;
   }
 
   const novaUnsure = nova && !dq.novaReliable;   // NOVA из грязного состава — не уверены
@@ -738,7 +883,7 @@ async function drawCard(product, ean){
       <div class="score" style="background:${nsColor}"><span class="lbl">Nutri-Score</span><span class="val">${ns?ns.toUpperCase():"—"}</span>${mark(nsComputed)}</div>
       <div class="score" style="background:${novaColor}"><span class="lbl">NOVA</span><span class="val">${nova||"—"}</span>${nova?('<small>'+novaLabel+'</small>'):''}${(novaComputed&&!novaUnsure)?mark(true):''}</div>
       <div class="score" style="background:${ecoColor}"><span class="lbl">Eco-Score</span><span class="val">${eco?eco.toUpperCase():"—"}</span>${!eco?'<small>нет данных</small>':''}</div>
-    </div>${(nsComputed||novaComputed)?'<div style="font-size:10.5px;color:var(--muted);margin-top:8px">Оценки с пометкой «расчёт» вычислены из состава и БЖУ, а не взяты из базы — возможны неточности.</div>':''}` : `<div class="empty" style="padding:8px 0">Оценки появятся после распознавания состава</div>`;
+    </div>${(nsComputed||novaComputed)?'<div style="font-size:10.5px;color:var(--muted);margin-top:8px">${t("computedNote")}</div>':''}` : `<div class="empty" style="padding:8px 0">${t("noConcerns")}</div>`;
 
   el("card").classList.remove("hidden");
   el("card").innerHTML = `
@@ -751,33 +896,37 @@ async function drawCard(product, ean){
     </div>
 
     <div class="layer">
-      <div class="layer-top"><span class="layer-name">Здоровье</span><span class="tag free">OFF · $0</span></div>
+      <div class="layer-top"><span class="layer-name">${t("health")}</span><span class="tag free">OFF · $0</span></div>
       ${scoresBlock}
       ${flags.length?`<div class="flags">${flags.join("")}</div>`:""}
-      ${dq.needsAI?`<button class="improve-btn" id="improveBtn">📷 Уточнить фото → ИИ</button>`:""}
+      ${dq.needsAI?`<button class="improve-btn" id="improveBtn">${t("improveBtn")}</button>`:""}
     </div>
 
     ${nutriRows?`<div class="layer">
-      <div class="layer-top"><span class="layer-name">Пищевая ценность · 100 г</span><span class="tag free">OFF · $0</span></div>
+      <div class="layer-top"><span class="layer-name">${t("nutrition")}</span><span class="tag free">OFF · $0</span></div>
       <table class="nutri">${nutriRows}</table>
     </div>`:""}
 
     ${product.ingredients_text_with_allergens?`<div class="layer">
-      <div class="layer-top"><span class="layer-name">Состав</span><span class="tag free">OFF · $0</span></div>
+      <div class="layer-top"><span class="layer-name">${t("ingredients")}</span><span class="tag free">OFF · $0</span></div>
       <div class="ingredients">${product.ingredients_text_with_allergens.replace(/class="allergen"/g,'class="alg"')}</div>
+      <div class="translation">
+        <div class="translation-lbl">${t("translation")}</div>
+        <div id="transOut"><button class="translate-btn" id="transBtn">${t("translateBtn")}</button></div>
+      </div>
     </div>`:""}
 
     <div class="layer">
-      <div class="layer-top"><span class="layer-name">Цены · Германия</span><span class="tag stub">заглушка · $$</span></div>
+      <div class="layer-top"><span class="layer-name">${t("prices")}</span><span class="tag stub">${t("stub")} · $$</span></div>
       ${priceBlock}
     </div>
 
     <div class="layer">
-      <div class="layer-top"><span class="layer-name">Оценка лаборатории</span><span class="tag stub">заглушка · ~$0</span></div>
+      <div class="layer-top"><span class="layer-name">${t("labTest")}</span><span class="tag stub">${t("stub")} · ~$0</span></div>
       ${labBlock}
     </div>
 
-    <div class="attr">Данные о составе © Open Food Facts (ODbL). Цены и оценки лабораторий — демо-заглушки.</div>
+    <div class="attr">${t("attrFood")}</div>
   `;
 
   // кнопка "уточнить фото → ИИ" (режим improve): чиним состав поверх данных OFF
@@ -785,6 +934,30 @@ async function drawCard(product, ean){
     const ib = el("improveBtn");
     if (ib) ib.addEventListener("click", ()=> openPhotoAsk(ean, product));
   }
+  wireTranslate(product.ingredients_text_with_allergens);
+}
+
+// Перевод состава — СПРАВОЧНО, отдельной строкой. Оригинал остаётся дословным
+// (состав с этикетки — юридический факт, перевод может исказить аллергены).
+async function wireTranslate(sourceText){
+  const btn = el("transBtn");
+  if (!btn || !sourceText) return;
+  btn.addEventListener("click", async ()=>{
+    const out = el("transOut");
+    out.textContent = t("translating");
+    try{
+      const res = await fetch(AI_PROXY_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ translate: sourceText, target: LANG })
+      });
+      if (!res.ok) throw new Error(res.status);
+      const d = await res.json();
+      out.textContent = d.translation || "—";
+    }catch(e){
+      out.textContent = "—";
+    }
+  });
 }
 
 /* ================================================================
@@ -816,9 +989,9 @@ function scoreCosmetic(product){
   const hasHigh = concerns.some(c => c.sev === "high");
   const hasMed  = concerns.some(c => c.sev === "med");
   let label, color;
-  if (hasHigh){ label = "Есть повод для внимания"; color = "red"; }
-  else if (hasMed || allergens.length){ label = "В целом ок, есть нюансы"; color = "yellow"; }
-  else { label = "Без явных поводов"; color = "green"; }
+  if (hasHigh){ label = t("verdictRed"); color = "red"; }
+  else if (hasMed || allergens.length){ label = t("verdictYellow"); color = "yellow"; }
+  else { label = t("verdictGreen"); color = "green"; }
   return { label, color, concerns, fragranceAllergens: allergens };
 }
 
@@ -837,10 +1010,10 @@ async function drawCosmeticCard(product, ean){
     <div class="concern ${c.sev}">
       <div class="concern-name">${c.name}</div>
       <div class="concern-why">${c.reason} · <span class="concern-src">${c.src}</span></div>
-    </div>`).join("") : `<div class="empty" style="padding:6px 0">Проблемных веществ из нашего списка не найдено</div>`;
+    </div>`).join("") : `<div class="empty" style="padding:6px 0">${t("noConcerns")}</div>`;
 
   const algFlags = s.fragranceAllergens.length
-    ? `<div class="flags">${s.fragranceAllergens.map(a => `<span class="flag warn">отдушка: ${a}</span>`).join("")}</div>` : "";
+    ? `<div class="flags">${s.fragranceAllergens.map(a => `<span class="flag warn">${t("fragrance")}: ${a}</span>`).join("")}</div>` : "";
 
   el("card").classList.remove("hidden");
   el("card").innerHTML = `
@@ -853,25 +1026,25 @@ async function drawCosmeticCard(product, ean){
     </div>
 
     <div class="layer">
-      <div class="layer-top"><span class="layer-name">Оценка состава</span><span class="tag free">OBF · $0</span></div>
+      <div class="layer-top"><span class="layer-name">${t("scoreAssessment")}</span><span class="tag free">OBF · $0</span></div>
       <div class="verdict" style="background:${vColor}">${s.label}</div>
-      ${inciDirty ? `<div class="flags"><span class="flag warn">⚠ INCI распознан плохо</span></div>` : ""}
+      ${inciDirty ? `<div class="flags"><span class="flag warn">${t("inciDirty")}</span></div>` : ""}
       <div class="concerns">${concernRows}</div>
       ${algFlags}
-      ${needsAI ? `<button class="improve-btn" id="improveBtn">📷 Уточнить фото → ИИ</button>` : ""}
+      ${needsAI ? `<button class="improve-btn" id="improveBtn">${t("improveBtn")}</button>` : ""}
     </div>
 
     ${inci ? `<div class="layer">
-      <div class="layer-top"><span class="layer-name">Состав (INCI)</span><span class="tag free">OBF · $0</span></div>
+      <div class="layer-top"><span class="layer-name">${t("ingredientsInci")}</span><span class="tag free">OBF · $0</span></div>
       <div class="ingredients">${inci}</div>
     </div>` : ""}
 
     <div class="layer">
-      <div class="layer-top"><span class="layer-name">Оценка лаборатории</span><span class="tag stub">заглушка · ~$0</span></div>
-      <div class="empty" style="padding:8px 0">Тест лаборатории по этой категории пока не занесён</div>
+      <div class="layer-top"><span class="layer-name">${t("labTest")}</span><span class="tag stub">${t("stub")} · ~$0</span></div>
+      <div class="empty" style="padding:8px 0">${t("labSoon")}</div>
     </div>
 
-    <div class="attr">Состав © Open Beauty Facts (ODbL). Оценки веществ — по регуляторным источникам (EU SCCS, BUND, Öko-Test). Не медицинская рекомендация.</div>
+    <div class="attr">${t("attrCosm")}</div>
   `;
 
   if (needsAI){
@@ -915,6 +1088,7 @@ function fileToBase64(file){
   });
 }
 
+el("langBtn").addEventListener("click", toggleLang);
 el("go").addEventListener("click", ()=>render(el("ean").value));
 el("ean").addEventListener("keydown", e=>{ if(e.key==="Enter") render(el("ean").value); });
 document.querySelectorAll(".examples button").forEach(b=>{
@@ -929,7 +1103,7 @@ const camBtn = el("camBtn"), reader = el("reader"), camHint = el("camHint");
 
 async function startCamera(){
   if (typeof Html5Qrcode === "undefined"){
-    camHint.textContent = "Сканер не загрузился — проверь соединение с интернетом.";
+    camHint.textContent = t("camNotLoaded");
     return;
   }
   scanner = new Html5Qrcode("reader", {
@@ -950,12 +1124,12 @@ async function startCamera(){
     );
     scanning = true;
     camBtn.classList.add("active");
-    camBtn.innerHTML = '<span>✕</span> Остановить';
-    camHint.textContent = "Наведи заднюю камеру на штрих-код товара.";
+    camBtn.innerHTML = '<span>✕</span> ' + t("stopCam");
+    camHint.textContent = t("camHint");
   }catch(err){
     reader.classList.remove("on");
     scanner = null;
-    camHint.textContent = "Нет доступа к камере. Скачай файл и открой на телефоне по https (GitHub Pages подходит).";
+    camHint.textContent = t("camNoAccess");
   }
 }
 
@@ -964,14 +1138,14 @@ async function stopCamera(){
   scanning = false; scanner = null;
   reader.classList.remove("on"); reader.innerHTML = "";
   camBtn.classList.remove("active");
-  camBtn.innerHTML = '<span>📷</span> Сканировать камерой';
+  camBtn.innerHTML = '<span>📷</span> ' + t("scanCam");
 }
 
 function onScan(text){
   const ean = (text || "").replace(/\D/g, "");   // оставляем только цифры
   el("ean").value = ean;
   stopCamera();
-  camHint.textContent = "Считано: " + ean;
+  camHint.textContent = t("scanned") + ean;
   render(ean);
 }
 
@@ -995,13 +1169,12 @@ function openPhotoAsk(ean, baseProduct){
   photoMode    = baseProduct ? "improve" : "new";
   const title = photoAsk.querySelector(".pa-title");
   if (title) title.textContent = (photoMode === "improve")
-    ? "Данных о составе не хватает. Сфотографируй список ингредиентов на упаковке — ИИ прочитает состав и аллергены, остальное из OFF сохранится."
-    : "Товара нет в базе. Сфотографируй список ингредиентов на упаковке — ИИ прочитает состав.";
+    ? t("photoAskImprove") : t("photoAskNew");
   // сброс UI
   backFile = null; frontFile = null;
   doneBack.classList.remove("on"); doneFront.classList.remove("on");
-  btnBack.textContent = "📷 Снять состав (ингредиенты)"; btnFront.textContent = "📷 Снять упаковку спереди";
-  btnRecognize.disabled = true; btnRecognize.textContent = "Распознать";
+  btnBack.textContent = t("shotIngredients"); btnFront.textContent = t("shotFront");
+  btnRecognize.disabled = true; btnRecognize.textContent = t("recognize");
   photoAsk.classList.add("on");
   photoAsk.scrollIntoView({ behavior: "smooth", block: "center" });
 }
@@ -1012,17 +1185,17 @@ btnFront.addEventListener("click", ()=> inpFront.click());
 
 inpBack.addEventListener("change", ()=>{
   backFile = inpBack.files[0] || null; inpBack.value = "";
-  if (backFile){ doneBack.textContent = "✓ состав снят — можно переснять"; doneBack.classList.add("on"); btnBack.textContent = "📷 Переснять состав"; }
+  if (backFile){ doneBack.textContent = t("doneIngredients"); doneBack.classList.add("on"); btnBack.textContent = t("reshotIngredients"); }
   btnRecognize.disabled = !backFile;    // распознавать можно, как только есть фото состава
 });
 inpFront.addEventListener("change", ()=>{
   frontFile = inpFront.files[0] || null; inpFront.value = "";
-  if (frontFile){ doneFront.textContent = "✓ упаковка снята"; doneFront.classList.add("on"); btnFront.textContent = "📷 Переснять упаковку"; }
+  if (frontFile){ doneFront.textContent = t("doneFront"); doneFront.classList.add("on"); btnFront.textContent = t("reshotFront"); }
 });
 
 btnRecognize.addEventListener("click", async ()=>{
   if (!backFile || !pendingEan) return;
-  btnRecognize.disabled = true; btnRecognize.textContent = "Распознаю…";
+  btnRecognize.disabled = true; btnRecognize.textContent = t("recognizing");
   // иконкой станет лицевая, если снята, иначе — оборот
   let userPhotoUrl = null;
   try { userPhotoUrl = URL.createObjectURL(frontFile || backFile); } catch(e){}
@@ -1047,12 +1220,13 @@ btnRecognize.addEventListener("click", async ()=>{
   // сброс состояния
   pendingEan = null; improveBase = null; photoMode = "new";
   backFile = null; frontFile = null;
-  btnRecognize.textContent = "Распознать"; btnRecognize.disabled = true;
-  btnBack.textContent = "📷 Снять состав (ингредиенты)"; btnFront.textContent = "📷 Снять упаковку спереди";
+  btnRecognize.textContent = t("recognize"); btnRecognize.disabled = true;
+  btnBack.textContent = t("shotIngredients"); btnFront.textContent = t("shotFront");
   doneBack.classList.remove("on"); doneFront.classList.remove("on");
 });
 
-// первый показ
+// применяем язык (авто по телефону / сохранённый) и делаем первый показ
+applyLang();
 render(el("ean").value);
 </script>
 </body>
