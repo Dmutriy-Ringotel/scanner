@@ -138,6 +138,7 @@
   /* кнопка "уточнить фото → ИИ" для товаров с битым составом */
   .improve-btn{margin-top:10px; width:100%; font-family:inherit; font-size:13px; font-weight:500; color:var(--stub); background:var(--stub-bg); border:1px solid #f0d9ac; border-radius:8px; padding:9px; cursor:pointer}
   .improve-btn:hover{background:#fbecd0}
+  .basis-note{margin-top:9px; font-size:10.5px; line-height:1.45; color:var(--muted)}
   /* косметика: вердикт + concern-строки */
   .verdict{border-radius:8px; padding:10px 12px; color:#fff; font-weight:600; font-size:14px; text-align:center; margin-bottom:10px}
   .concerns{display:flex; flex-direction:column; gap:6px}
@@ -179,7 +180,7 @@
 <div class="wrap">
   <header>
     <div class="head-row"><h1 id="h1t">Сканер продуктов · прототип</h1><button id="langBtn" class="lang-btn">RU</button></div>
-    <p id="subt">Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v21</b></p>
+    <p id="subt">Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v24</b></p>
   </header>
 
   <div class="scan-box">
@@ -256,12 +257,12 @@ const OFF_FIELDS = [
   "ingredients_analysis_tags","ingredients_text_with_allergens","additives_tags",
   "nutriments","nutrient_levels","categories_tags",
   // --- поля для гейта качества данных (видеть "грязный" состав, кейс Milbona) ---
-  "ingredients_n","unknown_ingredients_n","states_tags"
+  "ingredients_n","unknown_ingredients_n","states_tags","ingredients"
 ].join(",");
 const OBF_FIELDS = [
   "product_name","brands","quantity","image_front_small_url",
   "ingredients_text_with_allergens","ingredients_text","allergens_tags",
-  "categories_tags","ingredients_n","unknown_ingredients_n","states_tags"
+  "categories_tags","ingredients_n","unknown_ingredients_n","states_tags","ingredients"
 ].join(",");
 
 /* Кэш в памяти сессии. В реальном приложении — своя БД (та самая "своя база"). */
@@ -304,6 +305,10 @@ const I18N = {
     inciDirty: "⚠ INCI schlecht erkannt",
     improveBtn: "📷 Foto nachreichen → KI",
     computedNote: "Werte mit „berechnet“ stammen aus Zutaten und Nährwerten, nicht aus der Datenbank — Abweichungen möglich.",
+    priceDisclaimer: "Alle Preisangaben ohne Gewähr — Preise können je nach Filiale und Zeitpunkt abweichen.",
+    priceAsOf: "Stand:",
+    basisFood: "Bewertung auf Basis von Nutri-Score (Santé publique France) und NOVA-Klassifikation. Keine Aussage über die Qualität des Produkts, keine medizinische Empfehlung.",
+    basisCosm: "Bewertung einzelner Stoffe nach regulatorischen Quellen (EU SCCS, EU 1223/2009, BUND, Öko-Test, BfR) — unabhängig vom konkreten Produkt. Keine medizinische Empfehlung.",
     noConcerns: "Keine bedenklichen Stoffe aus unserer Liste gefunden",
     fragrance: "Duftstoff",
     notFound: "Produkt nicht in der Datenbank",
@@ -331,6 +336,7 @@ const I18N = {
     verdictUnknown: "Zutaten nicht erfasst — keine Bewertung möglich",
     noInciNote: "Ohne Zutatenliste können wir nichts bewerten. Fotografiere die INCI-Liste auf der Verpackung.",
     verdictRed: "Bedenkliche Stoffe enthalten", verdictYellow: "Weitgehend ok, mit Einschränkungen", verdictGreen: "Keine Auffälligkeiten",
+    noScore: "keine Daten",
     nova1: "unverarbeitet", nova2: "Küchenzutat", nova3: "verarbeitet", nova4: "hochverarbeitet", novaUnsure: "unsicher",
     palmOil: "Palmöl", palmOilMaybe: "evtl. Palmöl",
     lvLow: "niedrig", lvMod: "mäßig", lvHigh: "hoch",
@@ -362,6 +368,10 @@ const I18N = {
     inciDirty: "⚠ INCI распознан плохо",
     improveBtn: "📷 Уточнить фото → ИИ",
     computedNote: "Оценки с пометкой «расчёт» вычислены из состава и БЖУ, а не взяты из базы — возможны неточности.",
+    priceDisclaimer: "Цены указаны без гарантии — могут отличаться по филиалам и времени.",
+    priceAsOf: "На:",
+    basisFood: "Оценка на основе Nutri-Score (Santé publique France) и классификации NOVA. Не является суждением о качестве продукта и не заменяет медицинскую консультацию.",
+    basisCosm: "Оценка отдельных веществ по регуляторным источникам (EU SCCS, EU 1223/2009, BUND, Öko-Test, BfR) — независимо от конкретного продукта. Не медицинская рекомендация.",
     noConcerns: "Проблемных веществ из нашего списка не найдено",
     fragrance: "отдушка",
     notFound: "Товар не в базе",
@@ -389,6 +399,7 @@ const I18N = {
     verdictUnknown: "Состав не занесён — оценить нельзя",
     noInciNote: "Без списка ингредиентов оценить нечего. Сфотографируй состав (INCI) на упаковке.",
     verdictRed: "Есть повод для внимания", verdictYellow: "В целом ок, есть нюансы", verdictGreen: "Без явных поводов",
+    noScore: "нет данных",
     nova1: "необр.", nova2: "ингред.", nova3: "обработан", nova4: "ультра-обр.", novaUnsure: "не уверенно",
     palmOil: "пальмовое масло", palmOilMaybe: "возможно пальмовое масло",
     lvLow: "мало", lvMod: "умеренно", lvHigh: "много",
@@ -404,7 +415,7 @@ const t = (k) => (I18N[LANG] && I18N[LANG][k]) || I18N.de[k] || k;
 function applyLang(){
   document.documentElement.lang = LANG;
   el("h1t").textContent = t("title");
-  el("subt").innerHTML = t("subtitle") + ' <b id="ver">build v21</b>';
+  el("subt").innerHTML = t("subtitle") + ' <b id="ver">build v24</b>';
   el("ean").placeholder = t("eanPlaceholder");
   el("go").textContent = t("find");
   el("btnNewAi").textContent = t("newProduct");
@@ -536,6 +547,28 @@ function mergeAIintoProduct(base, ai){
 // ---- STUB: цены из SERP/Shopping API ------------------------------
 // Позже: сюда — запрос к легальному ценовому API по EAN (не по названию!),
 // с кэшем 24ч и ночным batch. Сейчас: фиксированная заглушка.
+/* Санитарная проверка цен.
+   Barcoo показывал йогурт за 65 € (оптовая цена из B2B-пула) — так делать нельзя:
+   неверная цена = Irreführung (UWG § 5) и мгновенная потеря доверия.
+   Правило: отбрасываем аномалии, требуем таймстемп, при сомнении НЕ показываем. */
+const PRICE_LIMITS = { min: 0.05, max: 30 };   // разумный коридор для FMCG/дрогери
+
+function sanitizePrices(list){
+  if (!Array.isArray(list) || !list.length) return null;
+  // 1) отбрасываем нечисловые и выходящие за коридор
+  let ok = list.filter(x => {
+    const p = Number(x.p);
+    return Number.isFinite(p) && p >= PRICE_LIMITS.min && p <= PRICE_LIMITS.max;
+  });
+  if (!ok.length) return null;
+  // 2) отбрасываем выбросы: цена, отличающаяся от медианы более чем в 5 раз,
+  //    почти всегда оптовая/ошибочная (кейс Barcoo)
+  const sorted = ok.map(x => Number(x.p)).sort((a,b)=>a-b);
+  const median = sorted[Math.floor(sorted.length/2)];
+  ok = ok.filter(x => Number(x.p) <= median * 5 && Number(x.p) >= median / 5);
+  return ok.length ? ok : null;
+}
+
 async function fetchPrices(ean){
   await wait(300);
   const mock = {
@@ -543,7 +576,7 @@ async function fetchPrices(ean){
     "3017620422003":[{shop:"Lidl",p:2.49},{shop:"Edeka",p:2.99},{shop:"dm",p:3.15}],
     "5449000000996":[{shop:"REWE",p:0.99},{shop:"Aldi Süd",p:0.95},{shop:"Edeka",p:1.09}]
   };
-  return mock[ean] || null; // null → "цену пока собираем" (мягкая деградация)
+  return sanitizePrices(mock[ean]); // null → "цену пока собираем" (мягкая деградация)
 }
 
 /* ================================================================
@@ -683,7 +716,15 @@ function pts(value, thresholds){
 
 // Nutri-Score РЕДАКЦИЯ 2023 для твёрдой пищи (не напитки/жиры/сыр — у них свои правила).
 // Пороги сверены с эталонными компонентами OFF (Almighurt: 1+2+1+0 −1 = 3 → C).
-function computeNutriScore(n){
+/* Nutri-Score считаем САМИ только тогда, когда можем сделать это честно.
+   Принцип: лучше "не знаем", чем неверная буква.
+   Не считаем, если:
+   1) нет клетчатки И доли фруктов/овощей — тогда позитивная часть занижается,
+      и полезные продукты (цельнозерновые, бобовые, овощные) получают оценку
+      на 1–2 ступени ХУЖЕ реальной. Проверено: мюсли A→C, хлеб A→C, суп A→B.
+   2) это напиток — у напитков в Nutri-Score отдельная шкала, а по "твёрдой"
+      кола выходит "C" вместо "E". Ложно-хорошая оценка опаснее заниженной. */
+function computeNutriScore(n, product){
   const kj    = n["energy-kj_100g"] ?? (n["energy-kcal_100g"] != null ? n["energy-kcal_100g"] * 4.184 : null);
   const sugar = n["sugars_100g"];
   const satfat= n["saturated-fat_100g"];
@@ -691,8 +732,16 @@ function computeNutriScore(n){
   const prot  = n["proteins_100g"];
   if (kj == null || sugar == null || satfat == null || salt == null) return null;
 
-  const fiber = n["fiber_100g"] ?? 0;
-  const fvl   = n["fruits-vegetables-legumes-estimate-from-ingredients_100g"] ?? 0; // %
+  // (2) напитки — своя шкала, которой у нас нет → не считаем
+  const cats = ((product && product.categories_tags) || []).join(" ").toLowerCase();
+  const name = ((product && product.product_name) || "").toLowerCase();
+  const isBeverage = /beverage|drink|getränk|getraenke|juice|saft|soda|limonade|wasser|water|cola|tee\b|tea\b|kaffee|coffee/.test(cats + " " + name);
+  if (isBeverage) return null;
+
+  // (1) без клетчатки и доли фруктов/овощей позитивная часть занижается → не считаем
+  const fiber = n["fiber_100g"];
+  const fvl   = n["fruits-vegetables-legumes-estimate-from-ingredients_100g"];
+  if (fiber == null && fvl == null) return null;
 
   // --- негативные баллы (2023) ---
   const pEnergy = pts(kj,    [335,670,1005,1340,1675,2010,2345,2680,3015,3350]);          // 0..10
@@ -702,9 +751,11 @@ function computeNutriScore(n){
   const N = pEnergy + pSugar + pSat + pSalt;
 
   // --- позитивные баллы (2023) ---
-  const pFvl   = fvl>80?5 : fvl>60?2 : fvl>40?1 : 0;              // 0..5
-  const pFiber = pts(fiber, [3.0,4.1,5.2,6.3,7.4]);              // 0..5
-  const pProt  = pts(prot ?? 0, [2.4,4.8,7.2,9.6,12,14,17]);    // 0..7
+  const fvlVal   = fvl ?? 0;
+  const fiberVal = fiber ?? 0;
+  const pFvl   = fvlVal>80?5 : fvlVal>60?2 : fvlVal>40?1 : 0;    // 0..5
+  const pFiber = pts(fiberVal, [3.0,4.1,5.2,6.3,7.4]);           // 0..5
+  const pProt  = pts(prot ?? 0, [2.4,4.8,7.2,9.6,12,14,17]);     // 0..7
 
   // белок не учитывается, если N≥11 и мало фруктов/овощей
   const P = pFvl + pFiber + ((N >= 11 && pFvl < 5) ? 0 : pProt);
@@ -720,23 +771,42 @@ function computeNova(ingredientsText){
   if (!ingredientsText) return null;
   const t = ingredientsText.toLowerCase();
 
-  // маркеры ультра-переработки → NOVA 4
+  // --- NOVA 4: маркеры ультра-переработки (вещества, которых нет на домашней кухне) ---
   const ultra = [
-    /e\s?\d{3}/,                              // E-номера (E160a и т.п.)
+    /e\s?\d{3}/,                               // E-номера (E160a и т.п.)
     /aroma|flavour|flavor/,                    // ароматизаторы
     /farbstoff|colour|color|carotin/,          // красители
     /emulgator|emulsifier|lecithin|lezithin/,  // эмульгаторы
-    /süßungsmittel|sweetener|aspartam|sucralose|acesulfam/,
+    /süßungsmittel|sweetener|aspartam|sucralose|acesulfam|steviol/,
     /modifizierte stärke|modified starch/,     // модиф. крахмал
-    /glukose-fruktose|glucose-fructose|maltodextrin|invertzucker|dextrose/,
-    /gehärtet|hydrogenated|isolat|isolate/
+    /glukose-fruktose|glucose-fructose|maltodextrin|invertzucker|dextrose|glukosesirup|glucose syrup/,
+    /gehärtet|hydrogenated|isolat|isolate|hydrolysiert|hydrolysed/,
+    /stabilisator|stabiliser|verdickungsmittel|thickener|antioxidationsmittel/,
+    /konservierungsstoff|preservative|geschmacksverstärker|flavour enhancer/
   ];
   if (ultra.some(re => re.test(t))) return 4;
 
-  // добавленные сахар/соль/масло → NOVA 3 (обработанный)
-  if (/zucker|sugar|salz|salt|meersalz|öl|oel|\boil\b/.test(t)) return 3;
+  // --- NOVA 2: кулинарные ингредиенты (продукт СОСТОИТ из масла/сахара/соли) ---
+  // Определяется по краткости состава: 1–2 позиции и все — кулинарные.
+  const items = t.split(/[,;()]/).map(x => x.trim()).filter(Boolean);
+  const culinaryOnly = /^(natives\s+)?(oliven|sonnenblumen|raps|kokos|palm)?[öo]l|^olive oil|^zucker$|^sugar$|^salz$|^salt$|^meersalz$|^honig$|^honey$|^butter$|^essig$|^vinegar$/;
+  if (items.length <= 2 && items.every(i => culinaryOnly.test(i))) return 2;
 
-  // иначе — минимально обработанный
+  // --- NOVA 3: обработанный = базовый продукт + ДОБАВЛЕННЫЕ соль/сахар/масло ---
+  // ВАЖНО: соль/культуры/фермент в сыре, твороге, йогурте — часть производства,
+  // а не «добавка для консервации» → такие продукты остаются NOVA 1.
+  const dairyProcess = /milchsäurekultur|lactic|kultur|culture|lab\b|rennet|fermente|starterkultur/;
+  const isDairyBase  = /milch|milk|sahne|cream|rahm|joghurt|yogurt|quark|käse|cheese|frischkäse/;
+  const saltOnlyDairy = isDairyBase.test(t) && dairyProcess.test(t);
+
+  const addedProcessing = /\bzucker\b|\bsugar\b|\bsirup\b|\bsyrup\b/.test(t)   // добавленный сахар
+    || (/\bsalz\b|\bsalt\b|meersalz/.test(t) && !saltOnlyDairy)                // соль (кроме сыроделия)
+    || /pflanzen[öo]l|sonnenblumen[öo]l|raps[öo]l|palm[öo]l|olive?n?[öo]l/.test(t) // добавленное масло
+    || /hefe|yeast|sauerteig|sourdough/.test(t)                                 // хлебопечение
+    || /geräuchert|smoked|gepökelt|cured|konserviert|in\s+lake/.test(t);
+  if (addedProcessing) return 3;
+
+  // --- NOVA 1: необработанный / минимально обработанный ---
   return 1;
 }
 
@@ -770,11 +840,37 @@ function looksSingleIngredient(text){
   return real.length <= 2;
 }
 
+// OFF часто засчитывает как «ингредиент» мусорные обрывки с упаковки:
+// шапку таблицы нутриентов, предупреждение о следах, условия хранения.
+// Проверено на реальных товарах: у "Kraft Futter" в unknown попала строка
+// «DURCHSCHNITTLICHE % RM* pro 100g», у пудинга — «kann Spuren ... enthalten».
+// Такие обрывки искусственно раздувают счётчик unknown → ложная «грязь».
+const NOISE_FRAGMENT = /kann spuren|spuren von|enthalten kann|durchschnittliche|pro 100\s?g|n[äa]hrwert|brennwert|mindestens haltbar|haltbar bis|nach dem [öo]ffnen|k[üu]hl.*lagern|gek[üu]hlt lagern|ungeöffnet|zutaten:|hersteller|verpackt|rm\*|referenzmenge/i;
+
+// считаем ингредиенты, отбрасывая мусорные обрывки
+function countRealIngredients(product){
+  const list = Array.isArray(product.ingredients) ? product.ingredients : null;
+  if (!list || !list.length){
+    // массива нет → работаем по счётчикам OFF, как раньше
+    return { total: Number(product.ingredients_n) || 0, unknown: Number(product.unknown_ingredients_n) || 0 };
+  }
+  let total = 0, unknown = 0;
+  for (const ing of list){
+    const text = (ing.text || ing.id || "").replace(/^..:/, "").replace(/-/g, " ");
+    if (NOISE_FRAGMENT.test(text)) continue;      // мусорный обрывок — не ингредиент
+    total++;
+    // нераспознанный = taxonomy-id с языковым префиксом (de:, fr:), а не en:
+    if (ing.id && !/^en:/.test(ing.id)) unknown++;
+  }
+  return { total, unknown };
+}
+
 function assessDataQuality(product){
   const p = product || {};
   const reasons = [];
-  const ingN     = Number(p.ingredients_n) || 0;
-  const unknownN = Number(p.unknown_ingredients_n) || 0;
+  const counts   = countRealIngredients(p);
+  const ingN     = counts.total;
+  const unknownN = counts.unknown;
   const states   = Array.isArray(p.states_tags) ? p.states_tags : [];
   const cats     = (Array.isArray(p.categories_tags) ? p.categories_tags : []).map(c=>c.toLowerCase());
   const hasIngText = !!(p.ingredients_text_with_allergens && p.ingredients_text_with_allergens.trim());
@@ -836,7 +932,7 @@ async function drawCard(product, ean){
   let ns = product.nutriscore_grade;
   let nova = product.nova_group;
   let nsComputed = false, novaComputed = false;
-  if (!ns){ const g = computeNutriScore(nmt); if (g){ ns = g; nsComputed = true; } }
+  if (!ns){ const g = computeNutriScore(nmt, product); if (g){ ns = g; nsComputed = true; } }
   if (!nova){ const v = computeNova(product.ingredients_text_with_allergens); if (v){ nova = v; novaComputed = true; } }
 
   const eco = product.ecoscore_grade;
@@ -877,10 +973,14 @@ async function drawCard(product, ean){
   let priceBlock;
   if (prices){
     const min = Math.min(...prices.map(p=>p.p));
+    // Обязательно: таймстемп + "без гарантии" + указание, что цена может отличаться.
+    // Это закрывает ось Irreführung (UWG § 5) — устаревшая цена без пометки = нарушение.
+    const stamp = new Date().toLocaleDateString(LANG === "ru" ? "ru-RU" : "de-DE",
+      { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" });
     priceBlock = `<div class="prices">` + prices
       .sort((a,b)=>a.p-b.p)
       .map(p=>`<div class="price-row ${p.p===min?'best':''}"><span class="shop">${p.shop}</span><span class="amt">${p.p.toFixed(2).replace('.',',')} €</span></div>`)
-      .join("") + `</div>`;
+      .join("") + `</div><div class="basis-note">${t("priceDisclaimer")} · ${t("priceAsOf")} ${stamp}</div>`;
   } else {
     priceBlock = `<div class="empty" style="padding:8px 0">${t("priceSoon")}</div>`;
   }
@@ -899,7 +999,7 @@ async function drawCard(product, ean){
   const mark = (on) => on ? '<small>расчёт</small>' : '';
   const scoresBlock = (ns||nova||eco) ? `
     <div class="scores">
-      <div class="score" style="background:${nsColor}"><span class="lbl">Nutri-Score</span><span class="val">${ns?ns.toUpperCase():"—"}</span>${mark(nsComputed)}</div>
+      <div class="score" style="background:${nsColor}"><span class="lbl">Nutri-Score</span><span class="val">${ns?ns.toUpperCase():"—"}</span>${ns?mark(nsComputed):'<small>'+t("noScore")+'</small>'}</div>
       <div class="score" style="background:${novaColor}"><span class="lbl">NOVA</span><span class="val">${nova||"—"}</span>${nova?('<small>'+novaLabel+'</small>'):''}${(novaComputed&&!novaUnsure)?mark(true):''}</div>
       <div class="score" style="background:${ecoColor}"><span class="lbl">Eco-Score</span><span class="val">${eco?eco.toUpperCase():"—"}</span>${!eco?'<small>нет данных</small>':''}</div>
     </div>${(nsComputed||novaComputed)?`<div style="font-size:10.5px;color:var(--muted);margin-top:8px">${t("computedNote")}</div>`:''}` : `<div class="empty" style="padding:8px 0">${t("noConcerns")}</div>`;
@@ -918,6 +1018,7 @@ async function drawCard(product, ean){
       <div class="layer-top"><span class="layer-name">${t("health")}</span><span class="tag free">OFF · $0</span></div>
       ${scoresBlock}
       ${flags.length?`<div class="flags">${flags.join("")}</div>`:""}
+      <div class="basis-note">${t("basisFood")}</div>
       ${dq.needsAI?`<button class="improve-btn" id="improveBtn">${t("improveBtn")}</button>`:""}
     </div>
 
@@ -1088,6 +1189,7 @@ async function drawCosmeticCard(product, ean){
       ${inciDirty ? `<div class="flags"><span class="flag warn">${t("inciDirty")}</span></div>` : ""}
       <div class="concerns">${concernRows}</div>
       ${algFlags}
+      <div class="basis-note">${t("basisCosm")}</div>
       ${needsAI ? `<button class="improve-btn" id="improveBtn">${t("improveBtn")}</button>` : ""}
     </div>
 
