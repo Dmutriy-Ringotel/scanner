@@ -179,7 +179,7 @@
 <div class="wrap">
   <header>
     <div class="head-row"><h1 id="h1t">Сканер продуктов · прототип</h1><button id="langBtn" class="lang-btn">RU</button></div>
-    <p id="subt">Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v20</b></p>
+    <p id="subt">Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v21</b></p>
   </header>
 
   <div class="scan-box">
@@ -328,6 +328,8 @@ const I18N = {
     translating: "übersetze…",
     attrFood: "Zutatendaten © Open Food Facts (ODbL). Preise und Labortests — Demo-Platzhalter.",
     attrCosm: "Zutaten © Open Beauty Facts (ODbL). Stoffbewertungen nach regulatorischen Quellen (EU SCCS, BUND, Öko-Test). Keine medizinische Empfehlung.",
+    verdictUnknown: "Zutaten nicht erfasst — keine Bewertung möglich",
+    noInciNote: "Ohne Zutatenliste können wir nichts bewerten. Fotografiere die INCI-Liste auf der Verpackung.",
     verdictRed: "Bedenkliche Stoffe enthalten", verdictYellow: "Weitgehend ok, mit Einschränkungen", verdictGreen: "Keine Auffälligkeiten",
     nova1: "unverarbeitet", nova2: "Küchenzutat", nova3: "verarbeitet", nova4: "hochverarbeitet", novaUnsure: "unsicher",
     palmOil: "Palmöl", palmOilMaybe: "evtl. Palmöl",
@@ -384,6 +386,8 @@ const I18N = {
     translating: "перевожу…",
     attrFood: "Данные о составе © Open Food Facts (ODbL). Цены и оценки лабораторий — демо-заглушки.",
     attrCosm: "Состав © Open Beauty Facts (ODbL). Оценки веществ — по регуляторным источникам (EU SCCS, BUND, Öko-Test). Не медицинская рекомендация.",
+    verdictUnknown: "Состав не занесён — оценить нельзя",
+    noInciNote: "Без списка ингредиентов оценить нечего. Сфотографируй состав (INCI) на упаковке.",
     verdictRed: "Есть повод для внимания", verdictYellow: "В целом ок, есть нюансы", verdictGreen: "Без явных поводов",
     nova1: "необр.", nova2: "ингред.", nova3: "обработан", nova4: "ультра-обр.", novaUnsure: "не уверенно",
     palmOil: "пальмовое масло", palmOilMaybe: "возможно пальмовое масло",
@@ -400,7 +404,7 @@ const t = (k) => (I18N[LANG] && I18N[LANG][k]) || I18N.de[k] || k;
 function applyLang(){
   document.documentElement.lang = LANG;
   el("h1t").textContent = t("title");
-  el("subt").innerHTML = t("subtitle") + ' <b id="ver">build v20</b>';
+  el("subt").innerHTML = t("subtitle") + ' <b id="ver">build v21</b>';
   el("ean").placeholder = t("eanPlaceholder");
   el("go").textContent = t("find");
   el("btnNewAi").textContent = t("newProduct");
@@ -1021,6 +1025,13 @@ function scoreCosmetic(product){
   const text = product.ingredients_text_with_allergens || product.ingredients_text || "";
   const allergens = (product.allergens_tags || []).map(a => a.replace(/^..:/, ""));
   const concerns = [];
+
+  // Нет состава → НЕ выносим вердикт. Зелёный при пустом INCI — это ложь
+  // ("проверять было нечего" ≠ "всё чисто"). Ошибка, за которую критикуют CodeCheck.
+  if (!text.trim()){
+    return { label: t("verdictUnknown"), color: "unknown", concerns: [], fragranceAllergens: [], unknown: true };
+  }
+
   for (const c of INCI_CONCERNS){
     const m = text.match(c.re);
     if (m) concerns.push({
@@ -1036,13 +1047,13 @@ function scoreCosmetic(product){
   if (hasHigh){ label = t("verdictRed"); color = "red"; }
   else if (hasMed || allergens.length){ label = t("verdictYellow"); color = "yellow"; }
   else { label = t("verdictGreen"); color = "green"; }
-  return { label, color, concerns, fragranceAllergens: allergens };
+  return { label, color, concerns, fragranceAllergens: allergens, unknown: false };
 }
 
 async function drawCosmeticCard(product, ean){
   const img = product.image_front_small_url;   // своё фото не показываем: снято «в руке», не товарный вид
   const s = scoreCosmetic(product);
-  const vColor = { green:"var(--na)", yellow:"var(--nc)", red:"var(--ne)" }[s.color] || "#c9cbc4";
+  const vColor = { green:"var(--na)", yellow:"var(--nc)", red:"var(--ne)", unknown:"#c9cbc4" }[s.color] || "#c9cbc4";
 
   // гейт для INCI: порог выше (таксономия косметики слабее, чем у еды)
   const ingN = Number(product.ingredients_n) || 0, unkN = Number(product.unknown_ingredients_n) || 0;
@@ -1050,11 +1061,13 @@ async function drawCosmeticCard(product, ean){
   const inciDirty = !product._aiEnhanced && ingN > 0 && unkN / ingN > 0.5;
   const needsAI = !inci || inciDirty;
 
-  const concernRows = s.concerns.length ? s.concerns.map(c => `
+  const concernRows = s.unknown
+    ? `<div class="empty" style="padding:6px 0">${t("noInciNote")}</div>`
+    : (s.concerns.length ? s.concerns.map(c => `
     <div class="concern ${c.sev}">
       <div class="concern-name">${c.name}</div>
       <div class="concern-why">${c.reason} · <span class="concern-src">${c.src}</span></div>
-    </div>`).join("") : `<div class="empty" style="padding:6px 0">${t("noConcerns")}</div>`;
+    </div>`).join("") : `<div class="empty" style="padding:6px 0">${t("noConcerns")}</div>`);
 
   const algFlags = s.fragranceAllergens.length
     ? `<div class="flags">${s.fragranceAllergens.map(a => `<span class="flag warn">${t("fragrance")}: ${a}</span>`).join("")}</div>` : "";
