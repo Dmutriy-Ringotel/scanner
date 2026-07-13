@@ -179,7 +179,7 @@
 <div class="wrap">
   <header>
     <div class="head-row"><h1 id="h1t">Сканер продуктов · прототип</h1><button id="langBtn" class="lang-btn">RU</button></div>
-    <p id="subt">Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v18</b></p>
+    <p id="subt">Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v19</b></p>
   </header>
 
   <div class="scan-box">
@@ -400,7 +400,7 @@ const t = (k) => (I18N[LANG] && I18N[LANG][k]) || I18N.de[k] || k;
 function applyLang(){
   document.documentElement.lang = LANG;
   el("h1t").textContent = t("title");
-  el("subt").innerHTML = t("subtitle") + ' <b id="ver">build v18</b>';
+  el("subt").innerHTML = t("subtitle") + ' <b id="ver">build v19</b>';
   el("ean").placeholder = t("eanPlaceholder");
   el("go").textContent = t("find");
   el("btnNewAi").textContent = t("newProduct");
@@ -570,9 +570,12 @@ async function fetchLabRating(product){
 // "нет нутриентов + нет категории, но есть состав" → это не еда.
 const COSMETIC_CATEGORY_HINTS = [
   "cosmetic","beauty","hair","shampoo","hairspray","haarspray","haar","deodorant","deo",
+  "antitranspirant","anti-transpirant","antiperspirant","transpirant",
   "shower","dusch","soap","seife","toothpaste","zahnpasta","zahn","body-care","skin-care",
-  "face-care","makeup","make-up","perfume","parfum","lotion","sunscreen","sonnencreme",
-  "rasier","shaving","pflege","haut","creme-de-douche","gel-douche"
+  "face-care","makeup","make-up","perfume","parfum","lotion","sunscreen","sonnencreme","sonnenschutz",
+  "rasier","shaving","pflege","haut","creme-de-douche","gel-douche",
+  "duft","spray","roll-on","rollon","balsam","serum","conditioner","spülung","zahncreme",
+  "handcreme","bodylotion","gesichts","körper","reinigung","peeling","maske","nagel","lippen"
 ];
 function looksLikeCosmetic(p){
   const cats = (Array.isArray(p.categories_tags) ? p.categories_tags : []).map(c=>c.toLowerCase());
@@ -582,7 +585,11 @@ function looksLikeCosmetic(p){
   // 2) состав похож на INCI (Aqua/Parfum/CI-номера/типичные ПАВы) — сильный признак косметики
   const ing = (p.ingredients_text_with_allergens || p.ingredients_text || "").toLowerCase();
   if (ing && (/\baqua\b/.test(ing) || /\bparfum\b/.test(ing) || /\bci \d{5}\b/.test(ing) ||
-              /sodium laureth|cocamidopropyl|glycerin.*sodium|dimethicone|phenoxyethanol/.test(ing))) return true;
+              /sodium laureth|cocamidopropyl|dimethicone|phenoxyethanol|tocopheryl acetate/.test(ing) ||
+              // аэрозоли и антиперспиранты: пропелленты + соли алюминия
+              /aluminum chlorohydrate|aluminium chlorohydrate|\bisobutane\b|\bpropellant\b/.test(ing) ||
+              // типичные INCI-маркеры, которых не бывает в еде
+              /isopropyl palmitate|octyldodecanol|disteardimonium|caprylic\/capric triglyceride|limonene.*linalool/.test(ing))) return true;
   return false;
 }
 
@@ -818,7 +825,7 @@ async function drawCard(product, ean){
   const [prices, lab] = await Promise.all([fetchPrices(ean), fetchLabRating(product)]);
   const dq = assessDataQuality(product);   // ← оценка качества данных
 
-  const img = product.image_front_small_url || product._userPhoto;
+  const img = product.image_front_small_url;   // своё фото не показываем: снято «в руке», не товарный вид
   const nmt = product.nutriments || {};
 
   // оценки: берём из OFF, если есть; иначе считаем сами (распознанные / неполные записи)
@@ -891,7 +898,7 @@ async function drawCard(product, ean){
       <div class="score" style="background:${nsColor}"><span class="lbl">Nutri-Score</span><span class="val">${ns?ns.toUpperCase():"—"}</span>${mark(nsComputed)}</div>
       <div class="score" style="background:${novaColor}"><span class="lbl">NOVA</span><span class="val">${nova||"—"}</span>${nova?('<small>'+novaLabel+'</small>'):''}${(novaComputed&&!novaUnsure)?mark(true):''}</div>
       <div class="score" style="background:${ecoColor}"><span class="lbl">Eco-Score</span><span class="val">${eco?eco.toUpperCase():"—"}</span>${!eco?'<small>нет данных</small>':''}</div>
-    </div>${(nsComputed||novaComputed)?'<div style="font-size:10.5px;color:var(--muted);margin-top:8px">${t("computedNote")}</div>':''}` : `<div class="empty" style="padding:8px 0">${t("noConcerns")}</div>`;
+    </div>${(nsComputed||novaComputed)?`<div style="font-size:10.5px;color:var(--muted);margin-top:8px">${t("computedNote")}</div>`:''}` : `<div class="empty" style="padding:8px 0">${t("noConcerns")}</div>`;
 
   el("card").classList.remove("hidden");
   el("card").innerHTML = `
@@ -1033,7 +1040,7 @@ function scoreCosmetic(product){
 }
 
 async function drawCosmeticCard(product, ean){
-  const img = product.image_front_small_url || product._userPhoto;
+  const img = product.image_front_small_url;   // своё фото не показываем: снято «в руке», не товарный вид
   const s = scoreCosmetic(product);
   const vColor = { green:"var(--na)", yellow:"var(--nc)", red:"var(--ne)" }[s.color] || "#c9cbc4";
 
@@ -1248,6 +1255,8 @@ btnRecognize.addEventListener("click", async ()=>{
   } else {
     // РЕЖИМ "С НУЛЯ": товара не было в OFF — берём распознанный как есть
     product = ai;
+    // ИИ не проставляет тип → определяем сами, иначе дезодорант отрисуется как еда
+    if (!product._failed && looksLikeCosmetic(product)) product._type = "cosmetic";
     if (userPhotoUrl && !product._failed) product._userPhoto = userPhotoUrl;
     if (!product._failed) cache.set(pendingEan, product);
   }
