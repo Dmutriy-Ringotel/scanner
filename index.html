@@ -179,7 +179,7 @@
 <div class="wrap">
   <header>
     <div class="head-row"><h1 id="h1t">Сканер продуктов · прототип</h1><button id="langBtn" class="lang-btn">RU</button></div>
-    <p id="subt">Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v19</b></p>
+    <p id="subt">Фаза 1 — Германия. Еда (OFF) + косметика (OBF). Цены и лаборатории — заглушки. <b id="ver">build v20</b></p>
   </header>
 
   <div class="scan-box">
@@ -400,7 +400,7 @@ const t = (k) => (I18N[LANG] && I18N[LANG][k]) || I18N.de[k] || k;
 function applyLang(){
   document.documentElement.lang = LANG;
   el("h1t").textContent = t("title");
-  el("subt").innerHTML = t("subtitle") + ' <b id="ver">build v19</b>';
+  el("subt").innerHTML = t("subtitle") + ' <b id="ver">build v20</b>';
   el("ean").placeholder = t("eanPlaceholder");
   el("go").textContent = t("find");
   el("btnNewAi").textContent = t("newProduct");
@@ -1081,6 +1081,10 @@ async function drawCosmeticCard(product, ean){
     ${inci ? `<div class="layer">
       <div class="layer-top"><span class="layer-name">${t("ingredientsInci")}</span><span class="tag free">OBF · $0</span></div>
       <div class="ingredients">${inci}</div>
+      <div class="translation">
+        <div class="translation-lbl">${t("translation")}</div>
+        <div id="transOut"><button class="translate-btn" id="transBtn">${t("translateBtn")}</button></div>
+      </div>
     </div>` : ""}
 
     <div class="layer">
@@ -1095,6 +1099,7 @@ async function drawCosmeticCard(product, ean){
     const ib = el("improveBtn");
     if (ib) ib.addEventListener("click", () => openPhotoAsk(ean, product));
   }
+  wireTranslate(inci);
 }
 
 /* ================================================================
